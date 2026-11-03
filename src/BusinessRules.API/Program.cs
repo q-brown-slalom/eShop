@@ -16,6 +16,8 @@ var app = builder.Build();
 
 app.MapDefaultEndpoints();
 
+app.MapRulesAdminApi();
+
 app.UseStatusCodePages();
 
 app.UseDefaultOpenApi();

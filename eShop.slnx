@@ -33,6 +33,7 @@
     <Project Path="tests/eShop.AppHost.UnitTests/eShop.AppHost.UnitTests.csproj" />
     <Project Path="tests/ClientApp.UnitTests/ClientApp.UnitTests.csproj" />
     <Project Path="tests/BusinessRules.UnitTests/BusinessRules.UnitTests.csproj" />
+    <Project Path="tests/BusinessRules.FunctionalTests/BusinessRules.FunctionalTests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />

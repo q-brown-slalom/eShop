@@ -1,0 +1,30 @@
+<Project Sdk="MSTest.Sdk">
+
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.6.0" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPublishable>false</IsPublishable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Asp.Versioning.Http.Client" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BusinessRules.API\BusinessRules.API.csproj" IsAspireProjectResource="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared with the unit tests so both exercise the same rule type. -->
+    <Compile Include="..\BusinessRules.UnitTests\TestRuleType.cs" Link="TestRuleType.cs" />
+  </ItemGroup>
+
+</Project>

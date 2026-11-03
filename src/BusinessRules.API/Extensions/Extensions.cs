@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 internal static class Extensions
 {
     public static void AddApplicationServices(this IHostApplicationBuilder builder)
@@ -14,6 +17,13 @@ internal static class Extensions
         services.AddMigration<RulesContext, RulesContextSeed>();
 
         services.AddTransient<IIntegrationEventLogService, IntegrationEventLogService<RulesContext>>();
+
+        // Rule types are registered in code with AddRuleType<T>(); phase 1 registers none (D1).
+        services.TryAddSingleton<RuleTypeRegistry>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddValidatorsFromAssemblyContaining<CreateDraftRequestValidator>();
+
+        services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
         builder.AddRabbitMqEventBus("eventbus");
     }

@@ -9,9 +9,14 @@ public class RulesContext(DbContextOptions<RulesContext> options) : DbContext(op
 {
     public const string DefaultSchema = "rules";
 
+    public DbSet<RuleVersion> RuleVersions => Set<RuleVersion>();
+
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         builder.HasDefaultSchema(DefaultSchema);
+        builder.ApplyConfigurationsFromAssembly(typeof(RulesContext).Assembly);
 
         // Add the outbox table to this context
         builder.UseIntegrationEventLogs();

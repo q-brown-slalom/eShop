@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\eShop.BusinessRules.Client\eShop.BusinessRules.Client.csproj" />
+    <ProjectReference Include="..\..\src\BusinessRules.API\BusinessRules.API.csproj" />
   </ItemGroup>
 
 </Project>
