@@ -1,4 +1,5 @@
 ﻿using FluentValidation;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 internal static class Extensions
 {
@@ -8,6 +9,7 @@ internal static class Extensions
         
         // Add the authentication services to DI
         builder.AddDefaultAuthentication();
+        services.AddAuthorizationBuilder().AddOrderingPolicies();
 
         // Pooling is disabled because of the following error:
         // Unhandled exception. System.InvalidOperationException:
@@ -48,6 +50,10 @@ internal static class Extensions
         services.AddScoped<IBuyerRepository, BuyerRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IRequestManager, RequestManager>();
+
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IApiUsageRecorder, ApiUsageRecorder>();
+        services.AddSingleton<OrderingMetrics>();
     }
 
     private static void AddEventBusSubscriptions(this IEventBusBuilder eventBus)

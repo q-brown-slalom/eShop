@@ -21,5 +21,10 @@ var orders = app.NewVersionedApi("Orders");
 orders.MapOrdersApiV1()
       .RequireAuthorization();
 
+var usage = app.NewVersionedApi("Usage");
+
+usage.MapUsageApiV1()
+     .RequireAuthorization(OrderingPolicies.UsageReader);
+
 app.UseDefaultOpenApi();
 app.Run();
