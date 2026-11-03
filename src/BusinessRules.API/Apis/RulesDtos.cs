@@ -82,3 +82,7 @@ public record UpdateDraftRequest(
     JsonElement Parameters,
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveTo);
+
+public record PublishRequest(string? GuardOverrideReason);
+
+public record PublishResultDto(Guid RuleVersionId, long SnapshotVersion);

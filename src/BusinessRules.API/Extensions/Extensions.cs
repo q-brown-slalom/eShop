@@ -17,6 +17,11 @@ internal static class Extensions
         services.AddMigration<RulesContext, RulesContextSeed>();
 
         services.AddTransient<IIntegrationEventLogService, IntegrationEventLogService<RulesContext>>();
+        services.AddTransient<IRulesIntegrationEventService, RulesIntegrationEventService>();
+        services.AddScoped<RulePublishingService>();
+        services.AddSingleton<BusinessRulesMetrics>();
+        // Replaced by the v1-clients publish guard once Ordering usage can be checked.
+        services.AddSingleton<IPublishGuard, AllowAllPublishGuard>();
 
         // Rule types are registered in code with AddRuleType<T>(); phase 1 registers none (D1).
         services.TryAddSingleton<RuleTypeRegistry>();

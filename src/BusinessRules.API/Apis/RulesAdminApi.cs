@@ -45,6 +45,13 @@ public static class RulesAdminApi
             .WithDescription("Replace the parameters and effective window of a draft. Published and superseded versions, and drafts changed concurrently, cannot be edited (409).")
             .WithTags("Rules");
 
+        api.MapPost("/versions/{id:guid}/publish", Publish)
+            .RequireAuthorization(RulesPolicies.Publisher)
+            .WithName("PublishRuleVersion")
+            .WithSummary("Publish a rule draft")
+            .WithDescription("Publish a draft into a new rules snapshot version and notify consumers. Non-drafts and concurrent publishes return 409; the publish guard may refuse the publish.")
+            .WithTags("Rules");
+
         api.MapGet("/audit", GetAudit)
             .WithName("ListRuleAudit")
             .WithSummary("List the rules audit log")
@@ -181,6 +188,40 @@ public static class RulesAdminApi
         return TypedResults.Ok(RuleVersionDto.From(version));
     }
 
+    public static async Task<Results<Ok<PublishResultDto>, NotFound, Conflict<ProblemDetails>, ForbidHttpResult, ProblemHttpResult>> Publish(
+        Guid id,
+        PublishRequest? request,
+        ClaimsPrincipal user,
+        RulePublishingService publishingService,
+        CancellationToken cancellationToken)
+    {
+        var outcome = await publishingService.PublishAsync(id, GetActor(user), request?.GuardOverrideReason, cancellationToken);
+
+        return outcome.Kind switch
+        {
+            PublishOutcomeKind.Published => TypedResults.Ok(new PublishResultDto(id, outcome.SnapshotVersion)),
+            PublishOutcomeKind.NotFound => TypedResults.NotFound(),
+            PublishOutcomeKind.GuardRejected when outcome.ProblemType == PublishProblemTypes.GuardUnavailable => TypedResults.Problem(
+                type: outcome.ProblemType,
+                title: "Publish guard unavailable",
+                detail: "The publish guard could not check this publish, so it was refused.",
+                statusCode: StatusCodes.Status503ServiceUnavailable),
+            PublishOutcomeKind.GuardRejected => TypedResults.Conflict(new ProblemDetails
+            {
+                Type = outcome.ProblemType,
+                Status = StatusCodes.Status409Conflict,
+                Title = "Publish refused by the publish guard",
+            }),
+            _ => TypedResults.Conflict(new ProblemDetails
+            {
+                Type = outcome.ProblemType,
+                Status = StatusCodes.Status409Conflict,
+                Title = outcome.Title,
+                Detail = outcome.Detail,
+            }),
+        };
+    }
+
     public static async Task<Ok<PaginatedItems<AuditEntryDto>>> GetAudit(
         RulesContext context,
         CancellationToken cancellationToken,
@@ -206,6 +247,6 @@ public static class RulesAdminApi
     private static string GetActor(ClaimsPrincipal user)
         => user.GetUserId() ?? throw new InvalidOperationException("The authenticated user has no 'sub' claim.");
 
-    private static string ToAuditJson(RuleVersion version)
+    internal static string ToAuditJson(RuleVersion version)
         => JsonSerializer.Serialize(RuleVersionDto.From(version), AuditJsonOptions);
 }
