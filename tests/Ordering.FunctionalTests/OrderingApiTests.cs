@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Asp.Versioning;
@@ -6,7 +7,12 @@ using Asp.Versioning.Http;
 using eShop.Ordering.API.Application.Commands;
 using eShop.Ordering.API.Application.Models;
 using eShop.Ordering.API.Application.Queries;
+using eShop.Ordering.Domain.AggregatesModel.BuyerAggregate;
+using eShop.Ordering.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Address = eShop.Ordering.Domain.AggregatesModel.OrderAggregate.Address;
+using DomainOrder = eShop.Ordering.Domain.AggregatesModel.OrderAggregate.Order;
 
 namespace eShop.Ordering.FunctionalTests;
 
@@ -183,6 +189,56 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetOrderReturnsPricingBreakdown()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        int orderId;
+        int buyerId;
+
+        // Seeded through the context: the POST path can't publish integration events from the test host.
+        using (var scope = _webApplicationFactory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+            var buyer = context.Buyers.Add(new Buyer(AutoAuthorizeMiddleware.IDENTITY_ID, "Pricing Buyer")).Entity;
+            var order = new DomainOrder("userId", "Pricing Buyer", new Address("street", "city", "state", "country", "zipcode"),
+                cardTypeId: 1, cardNumber: "XXXXXXXXXXXX0005", cardSecurityNumber: "123", cardHolderName: "name",
+                cardExpiration: DateTime.UtcNow.AddYears(1), buyerId: buyer.Id);
+            order.AddOrderItem(1, "cup", 10m, 3m, string.Empty, units: 2);
+            order.AddOrderItem(2, "mug", 5m, 0m, string.Empty);
+            order.ApplyPricing(shippingFee: 4.99m, pricingSnapshotVersion: 7);
+            context.Orders.Add(order);
+            await context.SaveChangesAsync(cancellationToken);
+            orderId = order.Id;
+            buyerId = buyer.Id;
+        }
+
+        try
+        {
+            var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+            var order = await _httpClient.GetFromJsonAsync<Order>($"api/orders/{orderId}", jsonOptions, cancellationToken);
+
+            Assert.Equal(25m, order.Subtotal);
+            Assert.Equal(3m, order.DiscountTotal);
+            Assert.Equal(4.99m, order.ShippingFee);
+            Assert.Equal(26.99m, order.Total);
+            Assert.Equal(3m, order.OrderItems.Sum(i => i.Discount));
+
+            var summaries = await _httpClient.GetFromJsonAsync<List<OrderSummary>>("api/orders", jsonOptions, cancellationToken);
+            var summary = Assert.Single(summaries, s => s.OrderNumber == orderId);
+            Assert.Equal(26.99, summary.Total);
+        }
+        finally
+        {
+            // Remove the seeded order so tests that expect an empty orders table stay independent of run order.
+            using var scope = _webApplicationFactory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+            await context.Orders.Where(o => o.Id == orderId).ExecuteDeleteAsync(cancellationToken);
+            await context.Buyers.Where(b => b.Id == buyerId).ExecuteDeleteAsync(cancellationToken);
+        }
     }
 
     [Fact]

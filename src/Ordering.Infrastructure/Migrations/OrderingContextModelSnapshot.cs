@@ -166,6 +166,9 @@ namespace Ordering.Infrastructure.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
+                    b.Property<decimal>("DiscountTotal")
+                        .HasColumnType("numeric");
+
                     b.Property<DateTime>("OrderDate")
                         .HasColumnType("timestamp with time zone");
 
@@ -177,6 +180,18 @@ namespace Ordering.Infrastructure.Migrations
                     b.Property<int?>("PaymentId")
                         .HasColumnType("integer")
                         .HasColumnName("PaymentMethodId");
+
+                    b.Property<long>("PricingSnapshotVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("ShippingFee")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("Subtotal")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("Total")
+                        .HasColumnType("numeric");
 
                     b.HasKey("Id");
 
@@ -194,6 +209,9 @@ namespace Ordering.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseHiLo(b.Property<int>("Id"), "orderitemseq");
+
+                    b.Property<decimal>("BasePrice")
+                        .HasColumnType("numeric");
 
                     b.Property<decimal>("Discount")
                         .HasColumnType("numeric");

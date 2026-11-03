@@ -106,6 +106,76 @@ public class OrderAggregateTest
     }
 
     [TestMethod]
+    public void GetTotalSubtractsDiscountAndAddsShipping()
+    {
+        var order = BuildPricedOrder();
+
+        Assert.AreEqual(26.99m, order.GetTotal());
+    }
+
+    [TestMethod]
+    public void ApplyPricingSetsBreakdown()
+    {
+        var order = BuildPricedOrder();
+
+        Assert.AreEqual(25m, order.Subtotal);
+        Assert.AreEqual(3m, order.DiscountTotal);
+        Assert.AreEqual(4.99m, order.ShippingFee);
+        Assert.AreEqual(26.99m, order.Total);
+        Assert.AreEqual(7L, order.PricingSnapshotVersion);
+    }
+
+    [TestMethod]
+    public void ApplyPricingRejectsNegativeShipping()
+    {
+        var order = new OrderBuilder(new AddressBuilder().Build())
+            .AddOne(1, "cup", 10m, 0, string.Empty)
+            .Build();
+
+        Assert.ThrowsExactly<OrderingDomainException>(() => order.ApplyPricing(-0.01m, 1));
+    }
+
+    [TestMethod]
+    public void AddOrderItemDefaultsBasePriceToUnitPrice()
+    {
+        var order = new OrderBuilder(new AddressBuilder().Build())
+            .AddOne(1, "cup", 10m, 0, string.Empty)
+            .AddOne(2, "mug", 8m, 0, string.Empty, basePrice: 9.5m)
+            .Build();
+
+        Assert.AreEqual(10m, order.OrderItems.Single(i => i.ProductId == 1).BasePrice);
+        Assert.AreEqual(9.5m, order.OrderItems.Single(i => i.ProductId == 2).BasePrice);
+    }
+
+    [TestMethod]
+    public void AddOrderItemKeepsBreakdownCurrentWithoutApplyPricing()
+    {
+        var order = new OrderBuilder(new AddressBuilder().Build())
+            .AddOne(1, "cup", 10m, 3, string.Empty, units: 2)
+            .AddOne(2, "mug", 5m, 0, string.Empty)
+            .Build();
+
+        Assert.AreEqual(25m, order.Subtotal);
+        Assert.AreEqual(3m, order.DiscountTotal);
+        Assert.AreEqual(0m, order.ShippingFee);
+        Assert.AreEqual(22m, order.Total);
+        Assert.AreEqual(order.GetTotal(), order.Total);
+    }
+
+    [TestMethod]
+    public void OrderItemRejectsUnitPriceBelowOneCent()
+    {
+        Assert.ThrowsExactly<OrderingDomainException>(() => new OrderItem(1, "cup", 0.009m, 0, string.Empty, 1));
+    }
+
+    private static Order BuildPricedOrder() =>
+        new OrderBuilder(new AddressBuilder().Build())
+            .AddOne(1, "cup", 10m, 3, string.Empty, units: 2)
+            .AddOne(2, "mug", 5m, 0, string.Empty)
+            .WithPricing(shippingFee: 4.99m, pricingSnapshotVersion: 7)
+            .Build();
+
+    [TestMethod]
     public void Add_new_Order_raises_new_event()
     {
         //Arrange
