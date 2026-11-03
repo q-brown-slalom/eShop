@@ -18,6 +18,7 @@
       "src\\WebhookClient\\WebhookClient.csproj",
       "src\\Webhooks.API\\Webhooks.API.csproj",
       "src\\eShop.AppHost\\eShop.AppHost.csproj",
+      "src\\eShop.BusinessRules.Client\\eShop.BusinessRules.Client.csproj",
       "src\\eShop.ServiceDefaults\\eShop.ServiceDefaults.csproj",
       "tests\\Basket.UnitTests\\Basket.UnitTests.csproj",
       "tests\\Basket.FunctionalTests\\Basket.FunctionalTests.csproj",
@@ -26,7 +27,8 @@
       "tests\\Ordering.FunctionalTests\\Ordering.FunctionalTests.csproj",
       "tests\\Ordering.UnitTests\\Ordering.UnitTests.csproj",
       "tests\\Webhooks.FunctionalTests\\Webhooks.FunctionalTests.csproj",
-      "tests\\eShop.AppHost.UnitTests\\eShop.AppHost.UnitTests.csproj"
+      "tests\\eShop.AppHost.UnitTests\\eShop.AppHost.UnitTests.csproj",
+      "tests\\BusinessRules.UnitTests\\BusinessRules.UnitTests.csproj"
     ]
   }
 }
