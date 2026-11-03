@@ -58,7 +58,8 @@ public static class PricingApi
     private static Dictionary<string, string[]> Validate(PriceQuoteRequest request)
     {
         var errors = new Dictionary<string, string[]>();
-        var items = request.Items;
+        // Ordering.API has nullable reference types off, so an empty or "null" body binds as null.
+        var items = request?.Items;
 
         if (items is null || items.Count is < MinLines or > MaxLines)
         {

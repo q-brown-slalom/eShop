@@ -89,6 +89,30 @@ public sealed class PricingApiTests : IClassFixture<OrderingApiFixture>
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("null")]
+    public async Task QuoteWithNullBodyReturnsBadRequest(string body)
+    {
+        var response = await PostRawQuoteAsync(body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ReadValidationProblemAsync(response);
+        Assert.Contains("items", problem.Errors);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"items":null}""")]
+    public async Task QuoteWithNullItemsReturnsBadRequest(string body)
+    {
+        var response = await PostRawQuoteAsync(body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ReadValidationProblemAsync(response);
+        Assert.Contains("items", problem.Errors);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-1)]
     [InlineData(10_001)]
@@ -128,6 +152,13 @@ public sealed class PricingApiTests : IClassFixture<OrderingApiFixture>
             l => { Assert.Equal(3, l.ProductId); Assert.Equal(3, l.Units); Assert.Equal(5.25m, l.UnitPrice); },
             l => { Assert.Equal(4, l.ProductId); Assert.Equal(1, l.Units); Assert.Equal(99.99m, l.UnitPrice); });
         Assert.Equal(115.74m, quote.Total);
+    }
+
+    private Task<HttpResponseMessage> PostRawQuoteAsync(string json)
+    {
+        var content = new StringContent(json);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        return _httpClient.PostAsync(QuoteUrl, content, TestContext.Current.CancellationToken);
     }
 
     private async Task<HttpResponseMessage> PostQuoteAsync(List<QuoteLine> items, bool anonymous = false)
