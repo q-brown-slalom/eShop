@@ -172,9 +172,16 @@ internal static class Extensions
             yarp.AddRoute("/api/catalog/{*any}", catalogCluster)
                 .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }]);
 
-            // Ordering routes
-            yarp.AddRoute("/api/orders/{*any}", orderingApi.GetEndpoint("http"))
+            // Ordering routes (orders v2 maps the full orders API, D6)
+            var orderingCluster = yarp.AddCluster(orderingApi.GetEndpoint("http"));
+
+            yarp.AddRoute("/api/orders/{*any}", orderingCluster)
+                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }]);
+
+            yarp.AddRoute("/api/pricing/quote", orderingCluster)
                 .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1"], Mode = QueryParameterMatchMode.Exact }]);
+
+            // No businessrules-api route: the rules snapshot is internal-only.
 
             // Identity routes
             yarp.AddRoute("/identity/{*any}", identityApi.GetEndpoint("http"))
