@@ -4,6 +4,7 @@ class AutoAuthorizeMiddleware
 {
     public const string IDENTITY_ID = "9e3163b9-1ae6-4652-9dc6-7898ab7b7a00";
     public const string TestScopesHeader = "x-test-scopes";
+    public const string AnonymousHeader = "x-test-anonymous";
 
     private readonly RequestDelegate _next;
 
@@ -14,6 +15,12 @@ class AutoAuthorizeMiddleware
 
     public async Task Invoke(HttpContext httpContext)
     {
+        if (httpContext.Request.Headers.ContainsKey(AnonymousHeader))
+        {
+            await _next.Invoke(httpContext);
+            return;
+        }
+
         var identity = new ClaimsIdentity("cookies");
 
         identity.AddClaim(new Claim("sub", IDENTITY_ID));

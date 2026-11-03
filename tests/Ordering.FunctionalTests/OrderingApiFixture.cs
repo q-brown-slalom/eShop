@@ -1,7 +1,10 @@
 ﻿using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using eShop.BusinessRules.Client.Snapshot;
+using eShop.Ordering.API.Application.Pricing;
 
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 namespace eShop.Ordering.FunctionalTests;
@@ -13,6 +16,9 @@ public sealed class OrderingApiFixture : WebApplicationFactory<Program>, IAsyncL
     public IResourceBuilder<PostgresServerResource> Postgres { get; private set; }
     public IResourceBuilder<PostgresServerResource> IdentityDB { get; private set; }
     public IResourceBuilder<ProjectResource> IdentityApi { get; private set; }
+
+    /// <summary>BusinessRules.API is never reachable from this host, so pricing must fall back to defaults.</summary>
+    public UnavailableRulesSnapshotSource RulesSnapshotSource { get; } = new();
 
     private string _postgresConnectionString;
 
@@ -39,6 +45,12 @@ public sealed class OrderingApiFixture : WebApplicationFactory<Program>, IAsyncL
         builder.ConfigureServices(services =>
         {
             services.AddSingleton<IStartupFilter>(new AutoAuthorizeStartupFilter());
+
+            services.RemoveAll<ICatalogPriceSource>();
+            services.AddSingleton<ICatalogPriceSource>(new FakeCatalogPriceSource());
+
+            services.RemoveAll<IRulesSnapshotSource>();
+            services.AddSingleton<IRulesSnapshotSource>(RulesSnapshotSource);
         });
         return base.CreateHost(builder);
     }

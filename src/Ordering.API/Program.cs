@@ -26,5 +26,10 @@ var usage = app.NewVersionedApi("Usage");
 usage.MapUsageApiV1()
      .RequireAuthorization(OrderingPolicies.UsageReader);
 
+var pricing = app.NewVersionedApi("Pricing");
+
+pricing.MapPricingApiV1()
+       .AllowAnonymous();
+
 app.UseDefaultOpenApi();
 app.Run();
