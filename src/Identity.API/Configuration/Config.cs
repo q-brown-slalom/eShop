@@ -10,6 +10,14 @@
                 new ApiResource("orders", "Orders Service"),
                 new ApiResource("basket", "Basket Service"),
                 new ApiResource("webhooks", "Webhooks registration Service"),
+                new ApiResource("businessrules", "Business Rules Service")
+                {
+                    Scopes = { "businessrules", "businessrules.admin" }
+                },
+                new ApiResource("ordering.usage", "Ordering Usage Service")
+                {
+                    Scopes = { "ordering.usage" }
+                },
             };
         }
 
@@ -22,6 +30,12 @@
                 new ApiScope("orders", "Orders Service"),
                 new ApiScope("basket", "Basket Service"),
                 new ApiScope("webhooks", "Webhooks registration Service"),
+                new ApiScope("businessrules", "Business Rules runtime snapshot"),
+                new ApiScope("businessrules.admin", "Business Rules administration")
+                {
+                    UserClaims = { JwtClaimTypes.Role }
+                },
+                new ApiScope("ordering.usage", "Ordering API usage statistics"),
             };
         }
 
@@ -39,7 +53,7 @@
         // client want to access resources (aka scopes)
         public static IEnumerable<Client> GetClients(IConfiguration configuration)
         {
-            return new List<Client>
+            var clients = new List<Client>
             {
                 new Client
                 {
@@ -185,8 +199,71 @@
                     {
                         "webhooks"
                     }
+                },
+                new Client
+                {
+                    ClientId = "businessrulesswaggerui",
+                    ClientName = "Business Rules Swagger UI",
+                    AllowedGrantTypes = GrantTypes.Implicit,
+                    AllowAccessTokensViaBrowser = true,
+
+                    RedirectUris = { $"{configuration["BusinessRulesApiClient"]}/swagger/oauth2-redirect.html" },
+                    PostLogoutRedirectUris = { $"{configuration["BusinessRulesApiClient"]}/swagger/" },
+
+                    AllowedScopes =
+                    {
+                        "businessrules.admin"
+                    }
                 }
             };
+
+            AddServiceClient(clients, configuration, "businessrules-reader", "Business Rules Reader", "BusinessRulesReaderSecret", "businessrules");
+            AddServiceClient(clients, configuration, "businessrules-api", "Business Rules API", "BusinessRulesApiSecret", "ordering.usage");
+
+            var eShopAdminClient = configuration["EShopAdminClient"];
+            if (!string.IsNullOrWhiteSpace(eShopAdminClient))
+            {
+                clients.Add(new Client
+                {
+                    ClientId = "eshopadmin",
+                    ClientName = "eShop Admin",
+                    ClientUri = eShopAdminClient,
+                    AllowedGrantTypes = GrantTypes.Code,
+                    RequirePkce = true,
+                    RequireClientSecret = false,
+                    RequireConsent = false,
+                    AllowAccessTokensViaBrowser = false,
+                    RedirectUris = { $"{eShopAdminClient}/signin-oidc" },
+                    PostLogoutRedirectUris = { $"{eShopAdminClient}/signout-callback-oidc" },
+                    AllowedScopes =
+                    {
+                        IdentityServerConstants.StandardScopes.OpenId,
+                        IdentityServerConstants.StandardScopes.Profile,
+                        "businessrules.admin"
+                    }
+                });
+            }
+
+            return clients;
+        }
+
+        // Service clients are registered only when their secret is configured; secrets are never hard-coded.
+        private static void AddServiceClient(List<Client> clients, IConfiguration configuration, string clientId, string clientName, string secretKey, string scope)
+        {
+            var secret = configuration[secretKey];
+            if (string.IsNullOrWhiteSpace(secret))
+            {
+                return;
+            }
+
+            clients.Add(new Client
+            {
+                ClientId = clientId,
+                ClientName = clientName,
+                AllowedGrantTypes = GrantTypes.ClientCredentials,
+                ClientSecrets = { new Secret(secret.Sha256()) },
+                AllowedScopes = { scope }
+            });
         }
     }
 }
