@@ -1,4 +1,4 @@
-﻿using Aspire.Hosting.Dotnet;
+using Aspire.Hosting.Dotnet;
 using Aspire.Hosting.Eventing;
 using Aspire.Hosting.Foundry;
 using Aspire.Hosting.Lifecycle;
@@ -83,6 +83,36 @@ internal static class Extensions
             .WaitFor(chat);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Adds the Business Rules service (T3) and its database, and wires the service-to-service clients.
+    /// Ordering.API references it but must never wait for it.
+    /// </summary>
+    public static IResourceBuilder<DotnetProjectResource> AddBusinessRules(this IDistributedApplicationBuilder builder,
+        IResourceBuilder<PostgresServerResource> postgres,
+        IResourceBuilder<RabbitMQServerResource> rabbitMq,
+        IResourceBuilder<DotnetProjectResource> orderingApi,
+        IResourceBuilder<DotnetProjectResource> identityApi,
+        EndpointReference identityEndpoint)
+    {
+        var rulesDb = postgres.AddDatabase("rulesdb");
+        var rulesReaderSecret = builder.AddParameter("businessrules-reader-secret", new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
+        var rulesApiSecret    = builder.AddParameter("businessrules-api-secret",    new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
+        var businessRulesApi = builder.AddDotnetProject("businessrules-api", "../BusinessRules.API")
+            .WithReference(rabbitMq).WaitFor(rabbitMq)
+            .WithReference(rulesDb).WaitFor(rulesDb)
+            .WithReference(orderingApi)                     // usage guard (D3); no WaitFor
+            .WithHttpHealthCheck("/health")
+            .WithEnvironment("Identity__Url", identityEndpoint)
+            .WithEnvironment("ServiceClient__ClientSecret", rulesApiSecret);
+        orderingApi.WithReference(businessRulesApi)          // NO WaitFor: T1 must not depend on T3
+            .WithEnvironment("ServiceClient__ClientSecret", rulesReaderSecret);
+        identityApi.WithEnvironment("BusinessRulesApiClient", businessRulesApi.GetEndpoint("http"))
+            .WithEnvironment("BusinessRulesReaderSecret", rulesReaderSecret)
+            .WithEnvironment("BusinessRulesApiSecret", rulesApiSecret);
+
+        return businessRulesApi;
     }
 
     public static IResourceBuilder<YarpResource> ConfigureMobileBffRoutes(this IResourceBuilder<YarpResource> builder,

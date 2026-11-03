@@ -3,6 +3,7 @@
     "path": "eShop.slnx",
     "projects": [
       "src\\Basket.API\\Basket.API.csproj",
+      "src\\BusinessRules.API\\BusinessRules.API.csproj",
       "src\\Catalog.API\\Catalog.API.csproj",
       "src\\EventBusRabbitMQ\\EventBusRabbitMQ.csproj",
       "src\\EventBus\\EventBus.csproj",

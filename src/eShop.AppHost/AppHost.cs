@@ -45,6 +45,8 @@ var orderingApi = builder.AddDotnetProject("ordering-api", "../Ordering.API")
     .WithHttpHealthCheck("/health")
     .WithEnvironment("Identity__Url", identityEndpoint);
 
+builder.AddBusinessRules(postgres, rabbitMq, orderingApi, identityApi, identityEndpoint);
+
 builder.AddDotnetProject("order-processor", "../OrderProcessor")
     .WithReference(rabbitMq).WaitFor(rabbitMq)
     .WithReference(orderDb)
