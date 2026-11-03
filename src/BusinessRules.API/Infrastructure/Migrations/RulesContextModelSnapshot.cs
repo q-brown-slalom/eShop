@@ -139,6 +139,23 @@ namespace eShop.BusinessRules.API.Infrastructure.Migrations
                     b.ToTable("ruleversions", "rules");
                 });
 
+            modelBuilder.Entity("eShop.BusinessRules.API.Model.RulesSnapshotRecord", b =>
+                {
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.Property<JsonDocument>("Content")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Version");
+
+                    b.ToTable("snapshots", "rules");
+                });
+
             modelBuilder.Entity("eShop.IntegrationEventLogEF.IntegrationEventLogEntry", b =>
                 {
                     b.Property<Guid>("EventId")

@@ -13,6 +13,8 @@ public class RulesContext(DbContextOptions<RulesContext> options) : DbContext(op
 
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
+    public DbSet<RulesSnapshotRecord> RulesSnapshots => Set<RulesSnapshotRecord>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         builder.HasDefaultSchema(DefaultSchema);

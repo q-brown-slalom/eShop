@@ -17,6 +17,7 @@ var app = builder.Build();
 app.MapDefaultEndpoints();
 
 app.MapRulesAdminApi();
+app.MapRulesRuntimeApiV1();
 
 app.UseStatusCodePages();
 

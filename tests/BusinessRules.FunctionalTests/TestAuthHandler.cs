@@ -6,7 +6,8 @@ using Microsoft.Extensions.Options;
 namespace eShop.BusinessRules.FunctionalTests;
 
 /// <summary>
-/// Authenticates every request from test headers so tests can choose the caller's scopes, roles and subject.
+/// Authenticates requests from test headers so tests can choose the caller's scopes, roles and subject.
+/// Requests without any test header are anonymous.
 /// </summary>
 public sealed class TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
@@ -18,6 +19,14 @@ public sealed class TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions>
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
+        // A request without any test header is anonymous.
+        if (!Request.Headers.ContainsKey(ScopesHeader)
+            && !Request.Headers.ContainsKey(RolesHeader)
+            && !Request.Headers.ContainsKey(SubjectHeader))
+        {
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+
         var identity = new ClaimsIdentity(SchemeName, "name", "role");
 
         if (Request.Headers.TryGetValue(SubjectHeader, out var subject) && !string.IsNullOrEmpty(subject))
