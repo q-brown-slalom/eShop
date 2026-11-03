@@ -19,6 +19,10 @@ public class RuleVersionEntityTypeConfiguration : IEntityTypeConfiguration<RuleV
         builder.Property(v => v.CreatedBy).HasMaxLength(200).IsRequired();
         builder.Property(v => v.PublishedBy).HasMaxLength(200);
 
+        // Postgres' xmin system column changes on every row update, so a stale draft edit
+        // (e.g. one racing a publish) fails with DbUpdateConcurrencyException instead of overwriting.
+        builder.Property<uint>("xmin").IsRowVersion();
+
         builder.HasIndex(v => new { v.RuleTypeId, v.Scope, v.VersionNumber }).IsUnique();
     }
 }

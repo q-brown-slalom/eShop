@@ -13,7 +13,7 @@ using eShop.BusinessRules.API.Infrastructure;
 namespace eShop.BusinessRules.API.Infrastructure.Migrations
 {
     [DbContext(typeof(RulesContext))]
-    [Migration("20261103230818_InitialRules")]
+    [Migration("20261103233115_InitialRules")]
     partial class InitialRules
     {
         /// <inheritdoc />
@@ -127,6 +127,12 @@ namespace eShop.BusinessRules.API.Infrastructure.Migrations
 
                     b.Property<int>("VersionNumber")
                         .HasColumnType("integer");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.HasKey("Id");
 

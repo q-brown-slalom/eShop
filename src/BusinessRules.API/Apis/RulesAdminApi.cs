@@ -42,7 +42,7 @@ public static class RulesAdminApi
         api.MapPut("/versions/{id:guid}", UpdateDraft)
             .WithName("UpdateRuleDraft")
             .WithSummary("Update a rule draft")
-            .WithDescription("Replace the parameters and effective window of a draft. Published and superseded versions cannot be edited (409).")
+            .WithDescription("Replace the parameters and effective window of a draft. Published and superseded versions, and drafts changed concurrently, cannot be edited (409).")
             .WithTags("Rules");
 
         api.MapGet("/audit", GetAudit)
@@ -161,7 +161,19 @@ public static class RulesAdminApi
             timeProvider.GetUtcNow(), GetActor(user), AuditAction.DraftUpdated, version.RuleTypeId, version.Scope, version.Id,
             beforeJson: before, afterJson: ToAuditJson(version)));
 
-        await context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return TypedResults.Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Rule version was changed concurrently",
+                Detail = $"Rule version {id} was changed by another request; reload it and try again."
+            });
+        }
 
         loggerFactory.CreateLogger(typeof(RulesAdminApi)).LogInformation(
             "Rule draft {RuleTypeId} v{VersionNumber} updated", version.RuleTypeId, version.VersionNumber);

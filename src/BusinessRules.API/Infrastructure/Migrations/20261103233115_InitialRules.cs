@@ -72,7 +72,8 @@ namespace eShop.BusinessRules.API.Infrastructure.Migrations
                     CreatedBy = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     PublishedBy = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
-                    PublishedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
+                    PublishedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
                 },
                 constraints: table =>
                 {

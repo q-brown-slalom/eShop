@@ -197,6 +197,65 @@ public sealed class RulesAdminApiTests
     }
 
     [TestMethod]
+    public async Task UpdateDraftPublishedConcurrentlyReturnsConflictAndKeepsPublishedVersion()
+    {
+        var created = await ReadVersionAsync(await CreateDraftAsync("""{"enabled":false}"""));
+
+        using var scope = Fixture.Services.CreateScope();
+        var connectionString = scope.ServiceProvider.GetRequiredService<RulesContext>().Database.GetConnectionString();
+        // Publishes the row after UpdateDraft has loaded it and passed its draft check, just before its save.
+        var publishBeforeSave = new PublishBeforeSaveInterceptor(created.Id, connectionString!);
+        await using var context = new RulesContext(new DbContextOptionsBuilder<RulesContext>()
+            .UseNpgsql(connectionString)
+            .AddInterceptors(publishBeforeSave)
+            .Options);
+        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", EditorSub)], "test"));
+
+        var result = await RulesAdminApi.UpdateDraft(
+            created.Id,
+            new UpdateDraftRequest(JsonDocument.Parse("""{"enabled":true}""").RootElement, Tomorrow.AddDays(5), null),
+            user,
+            context,
+            scope.ServiceProvider.GetRequiredService<FluentValidation.IValidator<UpdateDraftRequest>>(),
+            TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance,
+            TestContext.CancellationToken);
+
+        Assert.IsTrue(publishBeforeSave.Published);
+        var conflict = result.Result as Microsoft.AspNetCore.Http.HttpResults.Conflict<ProblemDetails>;
+        Assert.IsNotNull(conflict, $"Expected 409 Conflict but got {result.Result.GetType().Name}.");
+        Assert.AreEqual(409, conflict.Value?.Status);
+
+        var stored = await scope.ServiceProvider.GetRequiredService<RulesContext>().RuleVersions
+            .AsNoTracking().SingleAsync(v => v.Id == created.Id, TestContext.CancellationToken);
+        Assert.AreEqual(RuleVersionStatus.Published, stored.Status);
+        Assert.IsFalse(stored.Parameters.RootElement.GetProperty("enabled").GetBoolean());
+        Assert.IsFalse((await GetAuditAsync()).Data.Any(a => a.Action == AuditAction.DraftUpdated));
+    }
+
+    private sealed class PublishBeforeSaveInterceptor(Guid versionId, string connectionString) : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public bool Published { get; private set; }
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            if (!Published)
+            {
+                await using var other = new RulesContext(new DbContextOptionsBuilder<RulesContext>().UseNpgsql(connectionString).Options);
+                var version = await other.RuleVersions.SingleAsync(v => v.Id == versionId, cancellationToken);
+                version.Publish("publisher-1", DateTimeOffset.UtcNow);
+                await other.SaveChangesAsync(cancellationToken);
+                Published = true;
+            }
+
+            return result;
+        }
+    }
+
+    [TestMethod]
     public async Task GetVersionsReturnsHistoryNewestFirst()
     {
         await CreateDraftAsync("""{"enabled":false}""");
