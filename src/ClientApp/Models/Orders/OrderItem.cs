@@ -21,7 +21,11 @@ public class OrderItem
     public int Quantity { get; set; }
 
     public decimal Discount { get; set; }
-    public decimal Total => Quantity * UnitPrice;
+
+    [JsonPropertyName("isUnfulfillable")]
+    public bool IsUnfulfillable { get; set; }
+
+    public decimal Total => IsUnfulfillable ? 0 : Quantity * UnitPrice - Discount;
 
     public override string ToString()
     {
