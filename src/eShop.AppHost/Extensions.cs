@@ -115,6 +115,19 @@ internal static class Extensions
         return businessRulesApi;
     }
 
+    /// <summary>
+    /// Adds the <c>eshopadmin-url</c> parameter (the externally hosted eShopAdmin app, which has its own AppHost)
+    /// and hands it to Identity.API as the <c>eshopadmin</c> client's redirect base URL.
+    /// </summary>
+    public static IResourceBuilder<ParameterResource> AddEShopAdminClient(this IDistributedApplicationBuilder builder,
+        IResourceBuilder<DotnetProjectResource> identityApi)
+    {
+        var eShopAdminUrl = builder.AddParameter("eshopadmin-url", "https://localhost:7250");
+        identityApi.WithEnvironment("EShopAdminClient", eShopAdminUrl);
+
+        return eShopAdminUrl;
+    }
+
     public static IResourceBuilder<YarpResource> ConfigureMobileBffRoutes(this IResourceBuilder<YarpResource> builder,
         IResourceBuilder<DotnetProjectResource> catalogApi,
         IResourceBuilder<DotnetProjectResource> orderingApi,

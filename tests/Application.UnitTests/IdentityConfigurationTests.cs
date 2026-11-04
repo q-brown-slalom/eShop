@@ -58,6 +58,14 @@ public class IdentityConfigurationTests
     }
 
     [TestMethod]
+    public void RolesIdentityResourceCarriesRoleClaim()
+    {
+        var roles = Config.GetResources().Single(resource => resource.Name == "roles");
+
+        CollectionAssert.AreEqual(new[] { "role" }, roles.UserClaims.ToArray());
+    }
+
+    [TestMethod]
     public void ServiceClientsUseClientCredentialsWithLeastPrivilege()
     {
         var clients = Config.GetClients(BuildConfiguration()).ToDictionary(client => client.ClientId);
@@ -95,7 +103,7 @@ public class IdentityConfigurationTests
         Assert.IsFalse(admin.RequireClientSecret);
         CollectionAssert.AreEquivalent(GrantTypes.Code.ToArray(), admin.AllowedGrantTypes.ToArray());
         CollectionAssert.Contains(admin.RedirectUris.ToList(), "https://admin.test/signin-oidc");
-        CollectionAssert.AreEquivalent(new[] { "openid", "profile", "businessrules.admin" }, admin.AllowedScopes.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "openid", "profile", "roles", "businessrules.admin" }, admin.AllowedScopes.ToArray());
         CollectionAssert.DoesNotContain(admin.AllowedScopes.ToList(), "orders");
         CollectionAssert.DoesNotContain(admin.AllowedScopes.ToList(), "basket");
     }

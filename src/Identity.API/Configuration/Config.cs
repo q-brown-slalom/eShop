@@ -46,9 +46,10 @@
             return new List<IdentityResource>
             {
                 new IdentityResources.OpenId(),
-                new IdentityResources.Profile()
-            };
-        }
+                new IdentityResources.Profile(),
+                new IdentityResource("roles", "Your roles", new[] { JwtClaimTypes.Role })
+                            };
+                        }
 
         // client want to access resources (aka scopes)
         public static IEnumerable<Client> GetClients(IConfiguration configuration)
@@ -239,6 +240,7 @@
                     {
                         IdentityServerConstants.StandardScopes.OpenId,
                         IdentityServerConstants.StandardScopes.Profile,
+                        "roles",
                         "businessrules.admin"
                     }
                 });
