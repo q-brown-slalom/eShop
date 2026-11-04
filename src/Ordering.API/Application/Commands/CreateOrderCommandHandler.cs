@@ -41,14 +41,23 @@ public class CreateOrderCommandHandler
 
         foreach (var item in message.OrderItems)
         {
-            order.AddOrderItem(item.ProductId, item.ProductName, item.UnitPrice, item.Discount, item.PictureUrl, item.Units);
+            order.AddOrderItem(item.ProductId, item.ProductName, item.UnitPrice, item.Discount, item.PictureUrl, item.Units, item.BasePrice);
         }
 
-        _logger.LogInformation("Creating Order - Order: {@Order}", order);
+        order.ApplyPricing(message.ShippingFee, message.PricingSnapshotVersion);
 
         _orderRepository.Add(order);
 
-        return await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken);
+        using (_logger.BeginScope(new List<KeyValuePair<string, object>>
+        {
+            new("order.id", order.Id),
+            new("rules.snapshot.version", message.PricingSnapshotVersion)
+        }))
+        {
+            _logger.LogInformation("Creating order with {LineCount} lines", order.OrderItems.Count);
+
+            return await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken);
+        }
     }
 }
 

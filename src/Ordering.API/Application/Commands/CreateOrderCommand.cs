@@ -9,8 +9,7 @@
 // http://blog.gauffin.org/2012/06/griffin-container-introducing-command-support/
 // https://docs.microsoft.com/dotnet/csharp/programming-guide/classes-and-structs/how-to-implement-a-lightweight-class-with-auto-implemented-properties
 
-using eShop.Ordering.API.Application.Models;
-using eShop.Ordering.API.Extensions;
+using eShop.BusinessRules.Client.Pricing;
 
 [DataContract]
 public class CreateOrderCommand
@@ -58,16 +57,35 @@ public class CreateOrderCommand
     [DataMember]
     public IEnumerable<OrderItemDTO> OrderItems => _orderItems;
 
+    [DataMember]
+    public decimal ShippingFee { get; private set; }
+
+    [DataMember]
+    public long PricingSnapshotVersion { get; private set; }
+
     public CreateOrderCommand()
     {
         _orderItems = new List<OrderItemDTO>();
     }
 
-    public CreateOrderCommand(List<BasketItem> basketItems, string userId, string userName, string city, string street, string state, string country, string zipcode,
+    public CreateOrderCommand(PriceQuote quote, string userId, string userName, string city, string street, string state, string country, string zipcode,
         string cardNumber, string cardHolderName, DateTime cardExpiration,
         string cardSecurityNumber, int cardTypeId)
     {
-        _orderItems = basketItems.ToOrderItemsDTO().ToList();
+        ArgumentNullException.ThrowIfNull(quote);
+
+        _orderItems = quote.Lines.Select(line => new OrderItemDTO
+        {
+            ProductId = line.ProductId,
+            ProductName = line.ProductName,
+            PictureUrl = line.PictureUrl,
+            BasePrice = line.BasePrice,
+            UnitPrice = line.UnitPrice,
+            Discount = line.Discount,
+            Units = line.Units
+        }).ToList();
+        ShippingFee = quote.ShippingFee;
+        PricingSnapshotVersion = quote.SnapshotVersion;
         UserId = userId;
         UserName = userName;
         City = city;

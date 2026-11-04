@@ -34,6 +34,7 @@ public record OrderDraftDTO
                 Discount = oi.Discount,
                 ProductId = oi.ProductId,
                 UnitPrice = oi.UnitPrice,
+                BasePrice = oi.BasePrice,
                 PictureUrl = oi.PictureUrl,
                 Units = oi.Units,
                 ProductName = oi.ProductName
@@ -50,6 +51,8 @@ public record OrderItemDTO
     public string ProductName { get; init; }
 
     public decimal UnitPrice { get; init; }
+
+    public decimal BasePrice { get; init; }
 
     public decimal Discount { get; init; }
 

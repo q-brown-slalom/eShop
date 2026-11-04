@@ -60,7 +60,7 @@ public class IdentifiedCommandHandlerTest
     private CreateOrderCommand FakeOrderRequest(Dictionary<string, object> args = null)
     {
         return new CreateOrderCommand(
-            new List<BasketItem>(),
+            new eShop.BusinessRules.Client.Pricing.PriceQuote([], 0m, 0m, 0m, 0m, 0),
             userId: args != null && args.ContainsKey("userId") ? (string)args["userId"] : null,
             userName: args != null && args.ContainsKey("userName") ? (string)args["userName"] : null,
             city: args != null && args.ContainsKey("city") ? (string)args["city"] : null,

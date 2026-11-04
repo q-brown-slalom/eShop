@@ -40,26 +40,35 @@ public static class PricingApi
         }
         catch (UnknownProductsException ex)
         {
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["items"] = [$"Unknown product ids: {string.Join(", ", ex.ProductIds)}."]
-            });
+            return UnknownProducts(ex);
         }
         catch (CatalogUnavailableException ex)
         {
             loggerFactory.CreateLogger(typeof(PricingApi)).LogWarning(ex, "Quote failed because catalog prices are unavailable");
-            return TypedResults.Problem(
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                title: "Catalog unavailable",
-                detail: "Prices could not be retrieved from the catalog. Try again later.");
+            return CatalogUnavailable();
         }
     }
 
+    internal static ValidationProblem UnknownProducts(UnknownProductsException ex)
+        => TypedResults.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["items"] = [$"Unknown product ids: {string.Join(", ", ex.ProductIds)}."]
+        });
+
+    internal static ProblemHttpResult CatalogUnavailable()
+        => TypedResults.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Catalog unavailable",
+            detail: "Prices could not be retrieved from the catalog. Try again later.");
+
     private static Dictionary<string, string[]> Validate(PriceQuoteRequest request)
+        // Ordering.API has nullable reference types off, so an empty or "null" body binds as null.
+        => ValidateItems(request?.Items);
+
+    /// <summary>Checks the line count and per-line units shared by quotes and create-order requests.</summary>
+    internal static Dictionary<string, string[]> ValidateItems(IReadOnlyList<QuoteLine> items)
     {
         var errors = new Dictionary<string, string[]>();
-        // Ordering.API has nullable reference types off, so an empty or "null" body binds as null.
-        var items = request?.Items;
 
         if (items is null || items.Count is < MinLines or > MaxLines)
         {
