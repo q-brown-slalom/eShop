@@ -34,9 +34,17 @@ public class OrderBuilder
         decimal discount,
         string pictureUrl,
         int units = 1,
-        decimal? basePrice = null)
+        decimal? basePrice = null,
+        string promotionLabel = null,
+        decimal orderDiscountShare = 0m)
     {
-        order.AddOrderItem(productId, productName, unitPrice, discount, pictureUrl, units, basePrice);
+        order.AddOrderItem(productId, productName, unitPrice, discount, pictureUrl, units, basePrice, promotionLabel, orderDiscountShare);
+        return this;
+    }
+
+    public OrderBuilder WithFulfilmentRules(TimeSpan gracePeriod, StockShortfallPolicy policy)
+    {
+        order.SetFulfilmentRules(gracePeriod, policy);
         return this;
     }
 

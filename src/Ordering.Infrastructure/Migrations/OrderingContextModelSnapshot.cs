@@ -169,6 +169,9 @@ namespace Ordering.Infrastructure.Migrations
                     b.Property<decimal>("DiscountTotal")
                         .HasColumnType("numeric");
 
+                    b.Property<DateTime>("GracePeriodEndsAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("OrderDate")
                         .HasColumnType("timestamp with time zone");
 
@@ -186,6 +189,11 @@ namespace Ordering.Infrastructure.Migrations
 
                     b.Property<decimal>("ShippingFee")
                         .HasColumnType("numeric");
+
+                    b.Property<string>("StockShortfallPolicy")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
 
                     b.Property<decimal>("Subtotal")
                         .HasColumnType("numeric");
@@ -216,6 +224,12 @@ namespace Ordering.Infrastructure.Migrations
                     b.Property<decimal>("Discount")
                         .HasColumnType("numeric");
 
+                    b.Property<bool>("IsUnfulfillable")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("OrderDiscountShare")
+                        .HasColumnType("numeric");
+
                     b.Property<int>("OrderId")
                         .HasColumnType("integer");
 
@@ -228,6 +242,10 @@ namespace Ordering.Infrastructure.Migrations
                     b.Property<string>("ProductName")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("PromotionLabel")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
 
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("numeric");

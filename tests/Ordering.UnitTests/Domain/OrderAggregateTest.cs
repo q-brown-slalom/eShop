@@ -168,6 +168,54 @@ public class OrderAggregateTest
         Assert.ThrowsExactly<OrderingDomainException>(() => new OrderItem(1, "cup", 0.009m, 0, string.Empty, 1));
     }
 
+    [TestMethod]
+    public void NewOrderDefaultsToOneMinuteGracePeriodAndAllOrNothing()
+    {
+        var order = new OrderBuilder(new AddressBuilder().Build()).Build();
+
+        Assert.AreEqual(TimeSpan.FromMinutes(1), order.GracePeriodEndsAt - order.OrderDate);
+        Assert.AreEqual(StockShortfallPolicy.AllOrNothing, order.StockShortfallPolicy);
+    }
+
+    [TestMethod]
+    public void SetFulfilmentRulesStoresGracePeriodEnd()
+    {
+        var order = new OrderBuilder(new AddressBuilder().Build())
+            .WithFulfilmentRules(TimeSpan.FromMinutes(10), StockShortfallPolicy.PartialFulfilment)
+            .Build();
+
+        Assert.AreEqual(TimeSpan.FromMinutes(10), order.GracePeriodEndsAt - order.OrderDate);
+        Assert.AreEqual(StockShortfallPolicy.PartialFulfilment, order.StockShortfallPolicy);
+    }
+
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(61)]
+    public void SetFulfilmentRulesRejectsGracePeriodOutsideOneToSixtyMinutes(int minutes)
+    {
+        var order = new OrderBuilder(new AddressBuilder().Build()).Build();
+
+        Assert.ThrowsExactly<OrderingDomainException>(
+            () => order.SetFulfilmentRules(TimeSpan.FromMinutes(minutes), StockShortfallPolicy.AllOrNothing));
+    }
+
+    [TestMethod]
+    public void SetFulfilmentRulesRejectsOrdersThatAreNotSubmitted()
+    {
+        var order = new OrderBuilder(new AddressBuilder().Build()).Build();
+        order.SetAwaitingValidationStatus();
+
+        Assert.ThrowsExactly<OrderingDomainException>(
+            () => order.SetFulfilmentRules(TimeSpan.FromMinutes(5), StockShortfallPolicy.PartialFulfilment));
+    }
+
+    [TestMethod]
+    public void OrderItemRejectsOrderDiscountShareOutsideZeroToDiscount()
+    {
+        Assert.ThrowsExactly<OrderingDomainException>(() => new OrderItem(1, "cup", 10m, 2m, string.Empty, 1, null, null, 2.01m));
+        Assert.ThrowsExactly<OrderingDomainException>(() => new OrderItem(1, "cup", 10m, 2m, string.Empty, 1, null, null, -0.01m));
+    }
+
     private static Order BuildPricedOrder() =>
         new OrderBuilder(new AddressBuilder().Build())
             .AddOne(1, "cup", 10m, 3, string.Empty, units: 2)

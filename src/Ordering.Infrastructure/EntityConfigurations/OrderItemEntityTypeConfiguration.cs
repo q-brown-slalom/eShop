@@ -13,5 +13,8 @@ class OrderItemEntityTypeConfiguration
             .UseHiLo("orderitemseq");
 
         orderItemConfiguration.Property<int>("OrderId");
+
+        orderItemConfiguration.Property(o => o.PromotionLabel)
+            .HasMaxLength(60);
     }
 }
