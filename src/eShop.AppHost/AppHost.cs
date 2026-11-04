@@ -28,6 +28,8 @@ var identityApi = builder.AddDotnetProject("identity-api", "../Identity.API", o 
     .WithHttpHealthCheck("/health");
 
 var identityEndpoint = identityApi.GetEndpoint(launchProfileName);
+
+builder.AddEShopAdminClient(identityApi);
     
 var basketApi = builder.AddDotnetProject("basket-api", "../Basket.API")
     .WithReference(redis)
