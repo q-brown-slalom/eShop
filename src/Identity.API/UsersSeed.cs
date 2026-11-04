@@ -1,8 +1,11 @@
 ﻿
 namespace eShop.Identity.API;
 
-public class UsersSeed(ILogger<UsersSeed> logger, UserManager<ApplicationUser> userManager) : IDbSeeder<ApplicationDbContext>
+public class UsersSeed(ILogger<UsersSeed> logger, UserManager<ApplicationUser> userManager, RoleManager<IdentityRole> roleManager) : IDbSeeder<ApplicationDbContext>
 {
+    public const string RulesEditorRole = "RulesEditor";
+    public const string RulesPublisherRole = "RulesPublisher";
+
     public async Task SeedAsync(ApplicationDbContext context)
     {
         var alice = await userManager.FindByNameAsync("alice");
@@ -93,6 +96,42 @@ public class UsersSeed(ILogger<UsersSeed> logger, UserManager<ApplicationUser> u
             {
                 logger.LogDebug("bob already exists");
             }
+        }
+
+        await EnsureRoleAsync(RulesEditorRole);
+        await EnsureRoleAsync(RulesPublisherRole);
+
+        await EnsureUserInRoleAsync(alice, RulesPublisherRole);
+        await EnsureUserInRoleAsync(bob, RulesEditorRole);
+    }
+
+    private async Task EnsureRoleAsync(string roleName)
+    {
+        if (await roleManager.RoleExistsAsync(roleName))
+        {
+            return;
+        }
+
+        var result = await roleManager.CreateAsync(new IdentityRole(roleName));
+
+        if (!result.Succeeded)
+        {
+            throw new Exception(result.Errors.First().Description);
+        }
+    }
+
+    private async Task EnsureUserInRoleAsync(ApplicationUser user, string roleName)
+    {
+        if (await userManager.IsInRoleAsync(user, roleName))
+        {
+            return;
+        }
+
+        var result = await userManager.AddToRoleAsync(user, roleName);
+
+        if (!result.Succeeded)
+        {
+            throw new Exception(result.Errors.First().Description);
         }
     }
 }

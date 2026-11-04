@@ -133,6 +133,7 @@ public class RequestProvider(HttpMessageHandler _messageHandler) : IRequestProvi
             return;
         }
 
+        httpClient.DefaultRequestHeaders.Remove(parameter);
         httpClient.DefaultRequestHeaders.Add(parameter, Guid.NewGuid().ToString());
     }
 

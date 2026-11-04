@@ -16,15 +16,12 @@ public class OrderProcessorTests
     public async Task PublishesGracePeriodConfirmationForEveryEligibleOrder()
     {
         var repository = Substitute.For<IGracePeriodOrdersRepository>();
-        repository.GetConfirmedGracePeriodOrdersAsync(
-                TimeSpan.FromMinutes(1),
-                Arg.Any<CancellationToken>())
+        repository.GetConfirmedGracePeriodOrdersAsync(Arg.Any<CancellationToken>())
             .Returns([12, 34]);
         var eventBus = Substitute.For<IEventBus>();
         var service = new GracePeriodManagerService(
             Options.Create(new BackgroundTaskOptions
             {
-                GracePeriodTime = 1,
                 CheckUpdateTime = 30
             }),
             eventBus,

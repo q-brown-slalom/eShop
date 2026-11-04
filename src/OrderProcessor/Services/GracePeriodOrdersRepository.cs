@@ -4,18 +4,14 @@ namespace eShop.OrderProcessor.Services;
 
 public interface IGracePeriodOrdersRepository
 {
-    ValueTask<List<int>> GetConfirmedGracePeriodOrdersAsync(
-        TimeSpan gracePeriod,
-        CancellationToken cancellationToken);
+    ValueTask<List<int>> GetConfirmedGracePeriodOrdersAsync(CancellationToken cancellationToken);
 }
 
 internal sealed class GracePeriodOrdersRepository(
     NpgsqlDataSource dataSource,
     ILogger<GracePeriodOrdersRepository> logger) : IGracePeriodOrdersRepository
 {
-    public async ValueTask<List<int>> GetConfirmedGracePeriodOrdersAsync(
-        TimeSpan gracePeriod,
-        CancellationToken cancellationToken)
+    public async ValueTask<List<int>> GetConfirmedGracePeriodOrdersAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -24,9 +20,8 @@ internal sealed class GracePeriodOrdersRepository(
             command.CommandText = """
                 SELECT "Id"
                 FROM ordering.orders
-                WHERE CURRENT_TIMESTAMP - "OrderDate" >= @GracePeriodTime AND "OrderStatus" = 'Submitted'
+                WHERE "GracePeriodEndsAt" <= CURRENT_TIMESTAMP AND "OrderStatus" = 'Submitted'
                 """;
-            command.Parameters.AddWithValue("GracePeriodTime", gracePeriod);
 
             List<int> ids = [];
             await connection.OpenAsync(cancellationToken);
@@ -40,7 +35,7 @@ internal sealed class GracePeriodOrdersRepository(
         }
         catch (NpgsqlException exception)
         {
-            logger.LogError(exception, "Error querying confirmed grace period orders after grace period {GracePeriod}", gracePeriod);
+            logger.LogError(exception, "Error querying confirmed grace period orders");
             return [];
         }
     }

@@ -28,6 +28,8 @@ var identityApi = builder.AddDotnetProject("identity-api", "../Identity.API", o 
     .WithHttpHealthCheck("/health");
 
 var identityEndpoint = identityApi.GetEndpoint(launchProfileName);
+
+builder.AddEShopAdminClient(identityApi);
     
 var basketApi = builder.AddDotnetProject("basket-api", "../Basket.API")
     .WithReference(redis)
@@ -42,8 +44,11 @@ var catalogApi = builder.AddDotnetProject("catalog-api", "../Catalog.API")
 var orderingApi = builder.AddDotnetProject("ordering-api", "../Ordering.API")
     .WithReference(rabbitMq).WaitFor(rabbitMq)
     .WithReference(orderDb).WaitFor(orderDb)
+    .WithReference(catalogApi)
     .WithHttpHealthCheck("/health")
     .WithEnvironment("Identity__Url", identityEndpoint);
+
+builder.AddBusinessRules(postgres, rabbitMq, orderingApi, identityApi, identityEndpoint);
 
 builder.AddDotnetProject("order-processor", "../OrderProcessor")
     .WithReference(rabbitMq).WaitFor(rabbitMq)

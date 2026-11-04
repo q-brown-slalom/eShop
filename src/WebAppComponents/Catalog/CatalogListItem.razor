@@ -4,7 +4,7 @@
 
 <div class="catalog-item"
      data-sort-name="@Item.Name"
-     data-sort-price="@Item.Price.ToString(CultureInfo.InvariantCulture)">
+     data-sort-price="@Price.ToString(CultureInfo.InvariantCulture)">
     <a class="catalog-product" href="@ItemHelper.Url(Item)" data-enhance-nav="false">
         <span class='catalog-product-image'>
             <img alt="@Item.Name" src='@ProductImages.GetProductImageUrl(Item)' />
@@ -15,7 +15,7 @@
         </span>
         <span class='catalog-product-content'>
             <span class='name'>@Item.Name</span>
-            <span class='price'>$@Item.Price.ToPriceDisplay()</span>
+            <span class='price'>$@Price.ToPriceDisplay()</span>
         </span>
     </a>
 </div>
@@ -26,4 +26,10 @@
 
     [Parameter]
     public bool IsLoggedIn { get; set; }
+
+    // The server-quoted price for one unit; null falls back to the catalog price.
+    [Parameter]
+    public decimal? DisplayPrice { get; set; }
+
+    private decimal Price => DisplayPrice ?? Item.Price;
 }

@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\src\Identity.API\Identity.API.csproj" />
     <ProjectReference Include="..\..\src\Ordering.Domain\Ordering.Domain.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\src\Ordering.Infrastructure\Ordering.Infrastructure.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\src\OrderProcessor\OrderProcessor.csproj" IsAspireProjectResource="false" Aliases="OrderProcessorAssembly" />
   </ItemGroup>
 
 </Project>

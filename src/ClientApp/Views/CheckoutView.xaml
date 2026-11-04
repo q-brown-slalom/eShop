@@ -82,7 +82,7 @@
                 Grid.Row="4"
                 Grid.Column="0"
                 Style="{StaticResource OrderContentStyle}"
-                Text="{Binding Order.Total, StringFormat='${0:N2}'}" />
+                Text="{Binding Total, StringFormat='${0:N2}'}" />
 
             <Label
                 Grid.Row="0"

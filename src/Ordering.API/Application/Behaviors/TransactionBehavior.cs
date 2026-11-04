@@ -38,9 +38,28 @@ public class TransactionBehavior<TRequest, TResponse> : IPipelineBehavior<TReque
                 await using var transaction = await _dbContext.BeginTransactionAsync();
                 using (_logger.BeginScope(new List<KeyValuePair<string, object>> { new("TransactionContext", transaction.TransactionId) }))
                 {
-                    _logger.LogInformation("Begin transaction {TransactionId} for {CommandName} ({@Command})", transaction.TransactionId, typeName, request);
+                    _logger.LogInformation("Begin transaction {TransactionId} for {CommandName}", transaction.TransactionId, typeName);
 
-                    response = await next();
+                    try
+                    {
+                        response = await next();
+                    }
+                    catch
+                    {
+                        // Roll back everything the command wrote and forget its tracked entities, so neither a retry by
+                        // the execution strategy nor a later save in this scope writes them again.
+                        try
+                        {
+                            _dbContext.RollbackTransaction();
+                        }
+                        catch (Exception rollbackEx)
+                        {
+                            _logger.LogWarning(rollbackEx, "Rollback of transaction {TransactionId} for {CommandName} failed", transaction.TransactionId, typeName);
+                        }
+
+                        _dbContext.ChangeTracker.Clear();
+                        throw;
+                    }
 
                     _logger.LogInformation("Commit transaction {TransactionId} for {CommandName}", transaction.TransactionId, typeName);
 
@@ -56,7 +75,7 @@ public class TransactionBehavior<TRequest, TResponse> : IPipelineBehavior<TReque
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error Handling transaction for {CommandName} ({@Command})", typeName, request);
+            _logger.LogError(ex, "Error Handling transaction for {CommandName}", typeName);
 
             throw;
         }

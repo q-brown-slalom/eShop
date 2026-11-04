@@ -1,4 +1,8 @@
-﻿using eShop.Ordering.API.Application.IntegrationEvents;
+﻿using eShop.BusinessRules.Client.Pricing;
+using eShop.EventBus.Events;
+using eShop.Ordering.API.Application.IntegrationEvents;
+using eShop.Ordering.API.Application.IntegrationEvents.Events;
+using eShop.Ordering.API.Application.Rules;
 using eShop.Ordering.Domain.AggregatesModel.OrderAggregate;
 
 namespace eShop.Ordering.UnitTests.Application;
@@ -10,9 +14,12 @@ public class NewOrderRequestHandlerTest
     private readonly IIdentityService _identityServiceMock;
     private readonly IMediator _mediator;
     private readonly IOrderingIntegrationEventService _orderingIntegrationEventService;
+    private readonly IOrderFulfilmentRulesResolver _rulesResolver;
 
     public NewOrderRequestHandlerTest()
     {
+        _rulesResolver = Substitute.For<IOrderFulfilmentRulesResolver>();
+        _rulesResolver.Resolve().Returns(new OrderFulfilmentRules(TimeSpan.FromMinutes(1), StockShortfallPolicy.AllOrNothing));
 
         _orderRepositoryMock = Substitute.For<IOrderRepository>();
         _identityServiceMock = Substitute.For<IIdentityService>();
@@ -38,12 +45,136 @@ public class NewOrderRequestHandlerTest
 
         var LoggerMock = Substitute.For<ILogger<CreateOrderCommandHandler>>();
         //Act
-        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, LoggerMock);
+        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, LoggerMock, _rulesResolver);
         var cltToken = new CancellationToken();
         var result = await handler.Handle(fakeOrderCmd, cltToken);
 
         //Assert
         Assert.IsFalse(result);
+        await _orderingIntegrationEventService.DidNotReceive().AddAndSaveEventAsync(Arg.Any<OrderStartedIntegrationEvent>());
+    }
+
+    [TestMethod]
+    public async Task Handle_adds_order_started_event_only_after_order_is_saved()
+    {
+        var command = FakeOrderRequestWithBuyer(new Dictionary<string, object> { ["cardExpiration"] = DateTime.UtcNow.AddYears(1) }, ValidQuote());
+        _orderRepositoryMock.UnitOfWork.SaveEntitiesAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, Substitute.For<ILogger<CreateOrderCommandHandler>>(), _rulesResolver);
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        Assert.IsTrue(result);
+        Received.InOrder(() =>
+        {
+            _orderRepositoryMock.UnitOfWork.SaveEntitiesAsync(Arg.Any<CancellationToken>());
+            _orderingIntegrationEventService.AddAndSaveEventAsync(Arg.Any<OrderStartedIntegrationEvent>());
+        });
+    }
+
+    [TestMethod]
+    public async Task Handle_adds_no_order_started_event_when_order_breaks_an_invariant()
+    {
+        // A catalog price of 0.00 breaks the minimum unit price invariant while the order is built.
+        var quote = new PriceQuote(
+            [new PricedLine(1, "free cup", null, 1, BasePrice: 0m, UnitPrice: 0m, Discount: 0m, PromotionLabel: null)],
+            Subtotal: 0m, DiscountTotal: 0m, ShippingFee: 0m, Total: 0m, SnapshotVersion: 0);
+        var command = FakeOrderRequestWithBuyer(new Dictionary<string, object> { ["cardExpiration"] = DateTime.UtcNow.AddYears(1) }, quote);
+
+        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, Substitute.For<ILogger<CreateOrderCommandHandler>>(), _rulesResolver);
+
+        await Assert.ThrowsExactlyAsync<OrderingDomainException>(() => handler.Handle(command, CancellationToken.None));
+        await _orderingIntegrationEventService.DidNotReceive().AddAndSaveEventAsync(Arg.Any<IntegrationEvent>());
+        _orderRepositoryMock.DidNotReceive().Add(Arg.Any<Order>());
+    }
+
+    [TestMethod]
+    public async Task Handle_adds_no_order_started_event_when_save_throws()
+    {
+        var command = FakeOrderRequestWithBuyer(new Dictionary<string, object> { ["cardExpiration"] = DateTime.UtcNow.AddYears(1) }, ValidQuote());
+        _orderRepositoryMock.UnitOfWork.SaveEntitiesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<bool>(new OrderingDomainException("payment method rejected")));
+
+        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, Substitute.For<ILogger<CreateOrderCommandHandler>>(), _rulesResolver);
+
+        await Assert.ThrowsExactlyAsync<OrderingDomainException>(() => handler.Handle(command, CancellationToken.None));
+        await _orderingIntegrationEventService.DidNotReceive().AddAndSaveEventAsync(Arg.Any<IntegrationEvent>());
+    }
+
+    private static PriceQuote ValidQuote() => new(
+        [new PricedLine(1, "cup", null, 1, BasePrice: 10m, UnitPrice: 10m, Discount: 0m, PromotionLabel: null)],
+        Subtotal: 10m, DiscountTotal: 0m, ShippingFee: 0m, Total: 10m, SnapshotVersion: 0);
+
+    [TestMethod]
+    public async Task Handle_creates_order_with_quoted_prices_and_pricing_snapshot()
+    {
+        var quote = new PriceQuote(
+            [
+                new PricedLine(1, "cup", null, 2, BasePrice: 12.00m, UnitPrice: 10.00m, Discount: 3.00m, PromotionLabel: null),
+                new PricedLine(2, "mug", null, 1, BasePrice: 5.00m, UnitPrice: 5.00m, Discount: 0m, PromotionLabel: null),
+            ],
+            Subtotal: 25.00m, DiscountTotal: 3.00m, ShippingFee: 4.99m, Total: 26.99m, SnapshotVersion: 7);
+        var command = FakeOrderRequestWithBuyer(new Dictionary<string, object> { ["cardExpiration"] = DateTime.UtcNow.AddYears(1) }, quote);
+        Order added = null;
+        _orderRepositoryMock.Add(Arg.Do<Order>(o => added = o));
+        _orderRepositoryMock.UnitOfWork.SaveEntitiesAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, Substitute.For<ILogger<CreateOrderCommandHandler>>(), _rulesResolver);
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        Assert.IsTrue(result);
+        Assert.IsNotNull(added);
+        Assert.AreEqual(4.99m, added.ShippingFee);
+        Assert.AreEqual(7, added.PricingSnapshotVersion);
+        Assert.AreEqual(26.99m, added.Total);
+        var cup = added.OrderItems.Single(i => i.ProductId == 1);
+        Assert.AreEqual(12.00m, cup.BasePrice);
+        Assert.AreEqual(10.00m, cup.UnitPrice);
+        Assert.AreEqual(3.00m, cup.Discount);
+        Assert.AreEqual(2, cup.Units);
+    }
+
+    [TestMethod]
+    public async Task HandlerAppliesResolvedFulfilmentRules()
+    {
+        _rulesResolver.Resolve().Returns(new OrderFulfilmentRules(TimeSpan.FromMinutes(10), StockShortfallPolicy.PartialFulfilment));
+        var command = FakeOrderRequestWithBuyer(new Dictionary<string, object> { ["cardExpiration"] = DateTime.UtcNow.AddYears(1) }, ValidQuote());
+        Order added = null;
+        _orderRepositoryMock.Add(Arg.Do<Order>(o => added = o));
+        _orderRepositoryMock.UnitOfWork.SaveEntitiesAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, Substitute.For<ILogger<CreateOrderCommandHandler>>(), _rulesResolver);
+        await handler.Handle(command, CancellationToken.None);
+
+        Assert.IsNotNull(added);
+        Assert.AreEqual(StockShortfallPolicy.PartialFulfilment, added.StockShortfallPolicy);
+        Assert.AreEqual(TimeSpan.FromMinutes(10), added.GracePeriodEndsAt - added.OrderDate);
+    }
+
+    [TestMethod]
+    public async Task Handle_stores_promotion_label_and_order_discount_share_on_items()
+    {
+        var quote = new PriceQuote(
+            [
+                new PricedLine(1, "cup", null, 2, BasePrice: 10.00m, UnitPrice: 10.00m, Discount: 3.00m, PromotionLabel: "10% off", OrderDiscountShare: 1.00m),
+                new PricedLine(2, "mug", null, 1, BasePrice: 5.00m, UnitPrice: 5.00m, Discount: 0.50m, PromotionLabel: null, OrderDiscountShare: 0.50m),
+            ],
+            Subtotal: 25.00m, DiscountTotal: 3.50m, ShippingFee: 0m, Total: 21.50m, SnapshotVersion: 3, OrderPromotionLabel: "Spend more");
+        var command = FakeOrderRequestWithBuyer(new Dictionary<string, object> { ["cardExpiration"] = DateTime.UtcNow.AddYears(1) }, quote);
+        Order added = null;
+        _orderRepositoryMock.Add(Arg.Do<Order>(o => added = o));
+        _orderRepositoryMock.UnitOfWork.SaveEntitiesAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+        var handler = new CreateOrderCommandHandler(_mediator, _orderingIntegrationEventService, _orderRepositoryMock, _identityServiceMock, Substitute.For<ILogger<CreateOrderCommandHandler>>(), _rulesResolver);
+        await handler.Handle(command, CancellationToken.None);
+
+        Assert.IsNotNull(added);
+        var cup = added.OrderItems.Single(i => i.ProductId == 1);
+        Assert.AreEqual("10% off", cup.PromotionLabel);
+        Assert.AreEqual(1.00m, cup.OrderDiscountShare);
+        var mug = added.OrderItems.Single(i => i.ProductId == 2);
+        Assert.IsNull(mug.PromotionLabel);
+        Assert.AreEqual(0.50m, mug.OrderDiscountShare);
+        Assert.AreEqual(21.50m, added.Total);
     }
 
     [TestMethod]
@@ -63,10 +194,10 @@ public class NewOrderRequestHandlerTest
         return new Order("1", "fakeName", new Address("street", "city", "state", "country", "zipcode"), 1, "12", "111", "fakeName", DateTime.UtcNow.AddYears(1));
     }
 
-    private CreateOrderCommand FakeOrderRequestWithBuyer(Dictionary<string, object> args = null)
+    private CreateOrderCommand FakeOrderRequestWithBuyer(Dictionary<string, object> args = null, PriceQuote quote = null)
     {
         return new CreateOrderCommand(
-            new List<BasketItem>(),
+            quote ?? new PriceQuote([], 0m, 0m, 0m, 0m, 0),
             userId: args != null && args.ContainsKey("userId") ? (string)args["userId"] : null,
             userName: args != null && args.ContainsKey("userName") ? (string)args["userName"] : null,
             city: args != null && args.ContainsKey("city") ? (string)args["city"] : null,

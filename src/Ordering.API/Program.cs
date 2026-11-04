@@ -21,5 +21,18 @@ var orders = app.NewVersionedApi("Orders");
 orders.MapOrdersApiV1()
       .RequireAuthorization();
 
+orders.MapOrdersApiV2()
+      .RequireAuthorization();
+
+var usage = app.NewVersionedApi("Usage");
+
+usage.MapUsageApiV1()
+     .RequireAuthorization(OrderingPolicies.UsageReader);
+
+var pricing = app.NewVersionedApi("Pricing");
+
+pricing.MapPricingApiV1()
+       .AllowAnonymous();
+
 app.UseDefaultOpenApi();
 app.Run();

@@ -23,12 +23,19 @@ public class OrderQueries(OrderingContext context)
             Street = order.Address.Street,
             Zipcode = order.Address.ZipCode,
             Status = order.OrderStatus.ToString(),
-            Total = order.GetTotal(),
+            Subtotal = order.Subtotal,
+            DiscountTotal = order.DiscountTotal,
+            ShippingFee = order.ShippingFee,
+            Total = order.Total,
             OrderItems = order.OrderItems.Select(oi => new Orderitem
             {
                 ProductName = oi.ProductName,
                 Units = oi.Units,
                 UnitPrice = (double)oi.UnitPrice,
+                Discount = oi.Discount,
+                BasePrice = oi.BasePrice,
+                PromotionLabel = oi.PromotionLabel,
+                IsUnfulfillable = oi.IsUnfulfillable,
                 PictureUrl = oi.PictureUrl
             }).ToList()
         };
@@ -43,7 +50,8 @@ public class OrderQueries(OrderingContext context)
                 OrderNumber = o.Id,
                 Date = o.OrderDate,
                 Status = o.OrderStatus.ToString(),
-                Total =(double) o.OrderItems.Sum(oi => oi.UnitPrice* oi.Units)
+                Total = (double)o.Total,
+                DroppedItems = o.OrderItems.Where(i => i.IsUnfulfillable).Select(i => i.ProductName).ToList()
             })
             .ToListAsync();
     } 

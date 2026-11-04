@@ -1,22 +1,46 @@
-﻿using Microsoft.AspNetCore.Http.HttpResults;
+﻿using eShop.BusinessRules.Client.Pricing;
+using eShop.Ordering.API.Application.Pricing;
+using Microsoft.AspNetCore.Http.HttpResults;
 using CardType = eShop.Ordering.API.Application.Queries.CardType;
 using Order = eShop.Ordering.API.Application.Queries.Order;
 
 public static class OrdersApi
 {
+    public const string PricesChangedProblemType = "https://eshop/problems/prices-changed";
+
     public static RouteGroupBuilder MapOrdersApiV1(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("api/orders").HasApiVersion(1.0);
 
+        MapSharedRoutes(api);
+        api.MapPost("/", CreateOrderAsync);
+
+        return api;
+    }
+
+    // v2 maps every v1 route so clients can move their whole ordering client to api-version=2.0 (D6).
+    public static RouteGroupBuilder MapOrdersApiV2(this IEndpointRouteBuilder app)
+    {
+        var api = app.MapGroup("api/orders").HasApiVersion(2.0);
+
+        MapSharedRoutes(api);
+        api.MapPost("/", CreateOrderV2Async)
+            .WithName("CreateOrderV2")
+            .WithSummary("Create an order at server prices")
+            .WithDescription($"Prices the items server-side and creates the order, for the signed-in user (the token's `sub`; any `userId` in the body is ignored), only when the priced total equals `expectedTotal` (rounded to 2 decimals). Otherwise returns 409 ProblemDetails of type `{PricesChangedProblemType}` with the fresh quote in `quote` and records nothing, so the same `x-requestid` can be retried. Returns 400 listing unknown product ids, 400 ProblemDetails when the order breaks an ordering rule (such as an expired card), and 503 when the catalog is unavailable. A rejected or failed create saves nothing, so the same `x-requestid` can be retried.")
+            .WithTags("Orders");
+
+        return api;
+    }
+
+    private static void MapSharedRoutes(RouteGroupBuilder api)
+    {
         api.MapPut("/cancel", CancelOrderAsync);
         api.MapPut("/ship", ShipOrderAsync);
         api.MapGet("{orderId:int}", GetOrderAsync);
         api.MapGet("/", GetOrdersByUserAsync);
         api.MapGet("/cardtypes", GetCardTypesAsync);
         api.MapPost("/draft", CreateOrderDraftAsync);
-        api.MapPost("/", CreateOrderAsync);
-
-        return api;
     }
 
     public static async Task<Results<Ok, BadRequest<string>, ProblemHttpResult>> CancelOrderAsync(
@@ -38,7 +62,7 @@ public static class OrdersApi
             requestCancelOrder.Command.OrderNumber,
             requestCancelOrder);
 
-        var commandResult = await services.Mediator.Send(requestCancelOrder);
+        var commandResult = await SendIdentifiedCommandAsync(requestCancelOrder, services);
 
         if (!commandResult)
         {
@@ -67,7 +91,7 @@ public static class OrdersApi
             requestShipOrder.Command.OrderNumber,
             requestShipOrder);
 
-        var commandResult = await services.Mediator.Send(requestShipOrder);
+        var commandResult = await SendIdentifiedCommandAsync(requestShipOrder, services);
 
         if (!commandResult)
         {
@@ -115,55 +139,250 @@ public static class OrdersApi
         return await services.Mediator.Send(command);
     }
 
-    public static async Task<Results<Ok, BadRequest<string>>> CreateOrderAsync(
+    public static async Task<Results<Ok, BadRequest<string>, ValidationProblem, ProblemHttpResult>> CreateOrderAsync(
         [FromHeader(Name = "x-requestid")] Guid requestId,
         CreateOrderRequest request,
-        [AsParameters] OrderServices services)
+        [AsParameters] OrderServices services,
+        IOrderPricingService pricing,
+        IApiUsageRecorder usage,
+        OrderingMetrics metrics,
+        CancellationToken cancellationToken)
     {
-        
-        //mask the credit card number
-        
         services.Logger.LogInformation(
             "Sending command: {CommandName} - {IdProperty}: {CommandId}",
-            request.GetGenericTypeName(),
+            nameof(CreateOrderRequest),
             nameof(request.UserId),
-            request.UserId); //don't log the request as it has CC number
+            request?.UserId); //don't log the request as it has CC number
 
         if (requestId == Guid.Empty)
         {
-            services.Logger.LogWarning("Invalid IntegrationEvent - RequestId is missing - {@IntegrationEvent}", request);
+            services.Logger.LogWarning("Create order request rejected because the request id is missing");
             return TypedResults.BadRequest("RequestId is missing.");
         }
 
-        using (services.Logger.BeginScope(new List<KeyValuePair<string, object>> { new("IdentifiedCommandId", requestId) }))
+        // v1 clients send prices, but they are ignored: the order is charged the server quote.
+        var lines = request?.Items?.Select(i => i is null ? null : new QuoteLine(i.ProductId, i.Quantity)).ToList();
+        var errors = PricingApi.ValidateItems(lines);
+        if (errors.Count > 0)
         {
-            var maskedCCNumber = request.CardNumber.Substring(request.CardNumber.Length - 4).PadLeft(request.CardNumber.Length, 'X');
-            var createOrderCommand = new CreateOrderCommand(request.Items, request.UserId, request.UserName, request.City, request.Street,
-                request.State, request.Country, request.ZipCode,
-                maskedCCNumber, request.CardHolderName, request.CardExpiration,
-                request.CardSecurityNumber, request.CardTypeId);
+            return TypedResults.ValidationProblem(errors);
+        }
 
-            var requestCreateOrder = new IdentifiedCommand<CreateOrderCommand, bool>(createOrderCommand, requestId);
+        PriceQuote quote;
+        try
+        {
+            quote = await pricing.QuoteAsync(lines, cancellationToken);
+        }
+        catch (UnknownProductsException ex)
+        {
+            return PricingApi.UnknownProducts(ex);
+        }
+        catch (CatalogUnavailableException ex)
+        {
+            services.Logger.LogWarning(ex, "Create order failed because catalog prices are unavailable");
+            return PricingApi.CatalogUnavailable();
+        }
 
+        var command = CreateCommand(WithClientPictureUrls(quote, request.Items), request.UserId, request.UserName, request.City, request.Street,
+            request.State, request.Country, request.ZipCode, request.CardNumber, request.CardHolderName, request.CardExpiration,
+            request.CardSecurityNumber, request.CardTypeId);
+
+        var failure = await SendCreateOrderAsync(requestId, command, services);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        metrics.CreateOrderV1Called();
+        await RecordCreateOrderV1UsageAsync(usage, services.Logger);
+
+        return TypedResults.Ok();
+    }
+
+    public static async Task<Results<Ok, BadRequest<string>, ValidationProblem, ProblemHttpResult>> CreateOrderV2Async(
+        [FromHeader(Name = "x-requestid")] Guid requestId,
+        CreateOrderV2Request request,
+        [AsParameters] OrderServices services,
+        IOrderPricingService pricing,
+        OrderingMetrics metrics,
+        CancellationToken cancellationToken)
+    {
+        if (requestId == Guid.Empty)
+        {
+            services.Logger.LogWarning("Create order request rejected because the request id is missing");
+            return TypedResults.BadRequest("RequestId is missing.");
+        }
+
+        // The order is always placed for the authenticated caller (the token's sub), never for the body's UserId, so a
+        // caller can't create an order for, or clear the basket of, another buyer. A differing body UserId is ignored.
+        var userId = services.IdentityService.GetUserIdentity();
+        if (string.IsNullOrEmpty(userId))
+        {
+            return TypedResults.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "User required",
+                detail: "Creating an order requires a signed-in user.");
+        }
+
+        if (request?.UserId is not null && request.UserId != userId)
+        {
+            services.Logger.LogWarning("Create order request names a different user than the token; the order is placed for the token's user");
+        }
+
+        var errors = PricingApi.ValidateItems(request?.Items);
+        if (errors.Count > 0)
+        {
+            return TypedResults.ValidationProblem(errors);
+        }
+
+        PriceQuote quote;
+        try
+        {
+            quote = await pricing.QuoteAsync(request.Items, cancellationToken);
+        }
+        catch (UnknownProductsException ex)
+        {
+            return PricingApi.UnknownProducts(ex);
+        }
+        catch (CatalogUnavailableException ex)
+        {
+            services.Logger.LogWarning(ex, "Create order failed because catalog prices are unavailable");
+            return PricingApi.CatalogUnavailable();
+        }
+
+        // Nothing is sent to the mediator on a mismatch, so no idempotency record is written and the
+        // client can retry with the same x-requestid once it has shown the fresh total.
+        if (quote.Total != PriceRounding.Round(request.ExpectedTotal))
+        {
+            metrics.TotalMismatch();
+            using (services.Logger.BeginScope(new List<KeyValuePair<string, object>> { new("rules.snapshot.version", quote.SnapshotVersion) }))
+            {
+                services.Logger.LogInformation("Create order rejected because the expected total no longer matches the priced total");
+            }
+
+            return TypedResults.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                type: PricesChangedProblemType,
+                title: "Prices changed",
+                detail: "The order total changed since it was shown. Review the new quote and retry with its total.",
+                extensions: new Dictionary<string, object> { ["quote"] = quote });
+        }
+
+        var command = CreateCommand(quote, userId, request.UserName, request.City, request.Street,
+            request.State, request.Country, request.ZipCode, request.CardNumber, request.CardHolderName, request.CardExpiration,
+            request.CardSecurityNumber, request.CardTypeId);
+
+        var failure = await SendCreateOrderAsync(requestId, command, services);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        return TypedResults.Ok();
+    }
+
+    private static CreateOrderCommand CreateCommand(PriceQuote quote, string userId, string userName, string city, string street,
+        string state, string country, string zipCode, string cardNumber, string cardHolderName, DateTime cardExpiration,
+        string cardSecurityNumber, int cardTypeId)
+    {
+        //mask the credit card number
+        var maskedCCNumber = cardNumber is { Length: >= 4 }
+            ? cardNumber.Substring(cardNumber.Length - 4).PadLeft(cardNumber.Length, 'X')
+            : cardNumber;
+
+        return new CreateOrderCommand(quote, userId, userName, city, street, state, country, zipCode,
+            maskedCCNumber, cardHolderName, cardExpiration, cardSecurityNumber, cardTypeId);
+    }
+
+    // Catalog prices carry no picture URL, so v1 keeps storing the basket's picture URL as it did before server pricing.
+    private static PriceQuote WithClientPictureUrls(PriceQuote quote, List<BasketItem> items)
+    {
+        var pictures = items
+            .Where(i => i is not null && !string.IsNullOrEmpty(i.PictureUrl))
+            .GroupBy(i => i.ProductId)
+            .ToDictionary(g => g.Key, g => g.First().PictureUrl);
+
+        return quote with
+        {
+            Lines = quote.Lines
+                .Select(l => l.PictureUrl is null && pictures.TryGetValue(l.ProductId, out var url) ? l with { PictureUrl = url } : l)
+                .ToList()
+        };
+    }
+
+    // Returns null when the order was created (or the request id was already used for a created order), otherwise the
+    // problem to return. A failed command has been rolled back, so the same x-requestid can be retried.
+    private static async Task<ProblemHttpResult> SendCreateOrderAsync(Guid requestId, CreateOrderCommand command, OrderServices services)
+    {
+        using (services.Logger.BeginScope(new List<KeyValuePair<string, object>> { new("rules.snapshot.version", command.PricingSnapshotVersion) }))
+        {
+            var requestCreateOrder = new IdentifiedCommand<CreateOrderCommand, bool>(command, requestId);
+
+            // The command is not logged here or by the MediatR pipeline: it carries the card holder and address.
             services.Logger.LogInformation(
-                "Sending command: {CommandName} - {IdProperty}: {CommandId} ({@Command})",
+                "Sending command: {CommandName} - {IdProperty}: {CommandId}",
                 requestCreateOrder.GetGenericTypeName(),
                 nameof(requestCreateOrder.Id),
-                requestCreateOrder.Id,
-                requestCreateOrder);
+                requestCreateOrder.Id);
 
-            var result = await services.Mediator.Send(requestCreateOrder);
-
-            if (result)
+            bool result;
+            try
             {
-                services.Logger.LogInformation("CreateOrderCommand succeeded - RequestId: {RequestId}", requestId);
+                result = await services.Mediator.Send(requestCreateOrder);
             }
-            else
+            catch (OrderingDomainException ex)
+            {
+                services.Logger.LogWarning(ex, "CreateOrderCommand rejected - RequestId: {RequestId}", requestId);
+                return TypedResults.Problem(
+                    title: "Order rejected",
+                    detail: $"The order could not be created: {ex.Message}",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+            catch (Exception ex)
+            {
+                services.Logger.LogError(ex, "CreateOrderCommand failed - RequestId: {RequestId}", requestId);
+                return TypedResults.Problem(detail: "Create order failed to process.", statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            if (!result)
             {
                 services.Logger.LogWarning("CreateOrderCommand failed - RequestId: {RequestId}", requestId);
+                return TypedResults.Problem(detail: "Create order failed to process.", statusCode: StatusCodes.Status500InternalServerError);
             }
 
-            return TypedResults.Ok();
+            services.Logger.LogInformation("CreateOrderCommand succeeded - RequestId: {RequestId}", requestId);
+            return null;
+        }
+    }
+
+    // Cancel and ship keep answering a failed command with their 500 ProblemDetails now that failures propagate
+    // (and roll back) instead of being swallowed by IdentifiedCommandHandler.
+    private static async Task<bool> SendIdentifiedCommandAsync<T>(IdentifiedCommand<T, bool> command, OrderServices services)
+        where T : IRequest<bool>
+    {
+        try
+        {
+            return await services.Mediator.Send(command);
+        }
+        catch (Exception ex)
+        {
+            services.Logger.LogWarning(ex, "{CommandName} failed - RequestId: {RequestId}", command.GetGenericTypeName(), command.Id);
+            return false;
+        }
+    }
+
+    // Runs after the order's transaction has committed. The publish guard relies on this count, but a recording
+    // failure must never fail an order that was already created. CancellationToken.None keeps a client disconnect
+    // from dropping the count.
+    private static async Task RecordCreateOrderV1UsageAsync(IApiUsageRecorder usage, ILogger logger)
+    {
+        try
+        {
+            await usage.RecordAsync(IApiUsageRecorder.CreateOrderV1Operation, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to record create-order v1 usage");
         }
     }
 }
@@ -183,3 +402,20 @@ public record CreateOrderRequest(
     int CardTypeId,
     string Buyer,
     List<BasketItem> Items);
+
+public record CreateOrderV2Request(
+    string UserId,
+    string UserName,
+    string City,
+    string Street,
+    string State,
+    string Country,
+    string ZipCode,
+    string CardNumber,
+    string CardHolderName,
+    DateTime CardExpiration,
+    string CardSecurityNumber,
+    int CardTypeId,
+    string Buyer,
+    List<QuoteLine> Items,
+    decimal ExpectedTotal);

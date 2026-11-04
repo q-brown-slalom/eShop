@@ -1,0 +1,13 @@
+global using System.Text.Json;
+global using eShop.BusinessRules.API.Apis;
+global using eShop.BusinessRules.API.Authorization;
+global using eShop.BusinessRules.API.Infrastructure;
+global using eShop.BusinessRules.API.Model;
+global using eShop.BusinessRules.API.Services;
+global using eShop.BusinessRules.API.Validation;
+global using eShop.BusinessRules.Client.Rules;
+global using eShop.IntegrationEventLogEF;
+global using eShop.IntegrationEventLogEF.Services;
+global using eShop.ServiceDefaults;
+global using FluentValidation;
+global using Microsoft.EntityFrameworkCore;

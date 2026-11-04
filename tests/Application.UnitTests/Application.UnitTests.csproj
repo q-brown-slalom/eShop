@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\Identity.API\Identity.API.csproj" />
     <ProjectReference Include="..\..\src\OrderProcessor\OrderProcessor.csproj" />
     <ProjectReference Include="..\..\src\PaymentProcessor\PaymentProcessor.csproj" />
+    <ProjectReference Include="..\..\src\WebApp\WebApp.csproj" />
     <ProjectReference Include="..\..\src\WebhookClient\WebhookClient.csproj" />
     <ProjectReference Include="..\..\src\Webhooks.API\Webhooks.API.csproj" />
   </ItemGroup>

@@ -31,4 +31,7 @@ public class BasketCheckoutInfo
 
     public string? Buyer { get; set; }
     public Guid RequestId { get; set; }
+
+    /// <summary>The quoted total shown at checkout; the order is only created if the server still prices it the same.</summary>
+    public decimal ExpectedTotal { get; set; }
 }

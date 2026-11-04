@@ -23,7 +23,7 @@ Previous eShop versions:
     aspire --version
     ```
 
-3. Install and start an OCI-compatible container runtime. [Docker Desktop](https://www.docker.com/products/docker-desktop/) is the recommended default. [Podman](https://podman.io/docs/installation) is also supported; follow the [Aspire prerequisites](https://aspire.dev/get-started/prerequisites/) to configure it.
+3. Install and start an OCI-compatible container runtime. [Docker Desktop](https://www.docker.com/products/docker-desktop/) is the recommended default. [Podman](https://podman.io/docs/installation) 5.0 or later is also supported; see [Using Podman](#using-podman) below.
 4. Clone the repository:
 
     ```console
@@ -32,6 +32,69 @@ Previous eShop versions:
     ```
 
 No separate Aspire workload or Visual Studio component is required; the AppHost SDK and hosting integrations are referenced by the projects in this repository.
+
+#### Using Podman
+
+Use these steps instead of Docker Desktop. On Windows and macOS, Podman runs containers inside a Linux virtual machine called a Podman machine.
+
+1. Verify that Podman 5.0 or later is installed:
+
+    ```console
+    podman --version
+    ```
+
+2. Create the Podman machine (one-time setup). eShop runs several containers, including PostgreSQL, Redis, and RabbitMQ, so allocate at least 8 GB of memory:
+
+    ```console
+    podman machine init --memory 8192
+    ```
+
+    If you already have a machine with less memory, resize it:
+
+    ```console
+    podman machine stop
+    podman machine set --memory 8192
+    ```
+
+3. Start the Podman machine. It does not start automatically, so run this command after every reboot:
+
+    ```console
+    podman machine start
+    ```
+
+4. Confirm that Podman accepts connections. The command should print a table header (`CONTAINER ID  IMAGE ...`), not a `Cannot connect to Podman` error:
+
+    ```console
+    podman ps
+    ```
+
+5. Tell Aspire to use Podman. Aspire uses Docker by default when both runtimes are installed, so set the `ASPIRE_CONTAINER_RUNTIME` environment variable to `podman` and then open a new terminal:
+
+    ```powershell
+    # Windows (PowerShell)
+    [Environment]::SetEnvironmentVariable('ASPIRE_CONTAINER_RUNTIME', 'podman', 'User')
+    ```
+
+    ```bash
+    # macOS / Linux: add this line to your shell profile (for example, ~/.zshrc or ~/.bashrc)
+    export ASPIRE_CONTAINER_RUNTIME=podman
+    ```
+
+6. From the repository root, verify the environment:
+
+    ```console
+    aspire doctor
+    ```
+
+    Under **Container Runtime**, the output should look like `✅ Podman v5.x.x: running (configured via ASPIRE_CONTAINER_RUNTIME=podman) ← active`.
+
+| Symptom | Fix |
+| --- | --- |
+| `Cannot connect to Podman` or `connection refused` | The machine is stopped. Run `podman machine start`. |
+| `aspire doctor` shows Docker as active | Set `ASPIRE_CONTAINER_RUNTIME=podman` and open a new terminal. |
+| Containers exit unexpectedly or start slowly | Increase the machine's memory (see step 2). |
+
+For more information, see the [Aspire prerequisites](https://aspire.dev/get-started/prerequisites/).
 
 #### Optional IDE setup
 
@@ -42,7 +105,7 @@ No separate Aspire workload or Visual Studio component is required; the AppHost 
 ### Running the solution
 
 > [!WARNING]
-> Ensure that your container runtime is running before starting eShop.
+> Ensure that your container runtime is running before starting eShop. If you use Podman, run `podman machine start` first.
 
 #### From the terminal
 
@@ -90,6 +153,8 @@ npm ci
 npx playwright install chromium
 npm run test:e2e
 ```
+
+The rules journeys (`PromotionTest`, `PartialFulfilmentTest`) publish and then restore rules through BusinessRules.API as `USERNAME1`. They read optional `IDENTITY_URL` (default `http://localhost:5223`) and `BUSINESSRULES_URL` (default `http://localhost:5230`) from the environment or `.env`. Start the AppHost with `ESHOP_USE_HTTP_ENDPOINTS=1` for these journeys so Identity is served at `http://localhost:5223`, BusinessRules.API trusts that issuer, and the https redirect is avoided (see `.github/workflows/playwright.yml` and `src/eShop.AppHost/AppHost.cs`).
 
 ### Optional: AI Chatbot with Microsoft Foundry
 

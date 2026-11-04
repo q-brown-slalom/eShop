@@ -1,6 +1,8 @@
 using eShop.ClientApp.Models.Basket;
 using eShop.ClientApp.Models.Orders;
+using eShop.ClientApp.Models.Pricing;
 using eShop.ClientApp.Models.User;
+using eShop.ClientApp.Services.Catalog;
 
 namespace eShop.ClientApp.Services.Order;
 
@@ -168,11 +170,32 @@ public class OrderMockService : IOrderService
             .FirstOrDefault(o => o.OrderNumber.Equals(orderId));
     }
 
-    public async Task CreateOrderAsync(Models.Orders.Order newOrder)
+    public async Task<PriceQuote> GetQuoteAsync(IEnumerable<QuoteLine> lines)
+    {
+        var catalogService = new CatalogMockService();
+        var pricedLines = new List<PricedLine>();
+
+        foreach (var line in lines.GroupBy(l => l.ProductId))
+        {
+            var item = await catalogService.GetCatalogItemAsync(line.Key)
+                       ?? throw new InvalidOperationException($"Unknown product id {line.Key}.");
+            var units = line.Sum(l => l.Units);
+
+            pricedLines.Add(new PricedLine(item.Id, item.Name, item.PictureUri, units, item.Price, item.Price, 0m, null));
+        }
+
+        var subtotal = pricedLines.Sum(l => l.Units * l.UnitPrice);
+
+        return new PriceQuote(pricedLines, subtotal, 0m, 0m, subtotal, 0);
+    }
+
+    public async Task<CreateOrderResult> CreateOrderAsync(Models.Orders.Order newOrder, decimal expectedTotal)
     {
         await Task.Delay(10);
 
         MockOrders.Add(newOrder);
+
+        return new CreateOrderResult.Created();
     }
 
     public OrderCheckout MapOrderToBasket(Models.Orders.Order order)

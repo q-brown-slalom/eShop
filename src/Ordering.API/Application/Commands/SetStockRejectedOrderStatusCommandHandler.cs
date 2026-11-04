@@ -1,4 +1,6 @@
-﻿namespace eShop.Ordering.API.Application.Commands;
+﻿using eShop.BusinessRules.Client.Pricing;
+
+namespace eShop.Ordering.API.Application.Commands;
 
 // Regular CommandHandler
 public class SetStockRejectedOrderStatusCommandHandler : IRequestHandler<SetStockRejectedOrderStatusCommand, bool>
@@ -27,7 +29,7 @@ public class SetStockRejectedOrderStatusCommandHandler : IRequestHandler<SetStoc
             return false;
         }
 
-        orderToUpdate.SetCancelledStatusWhenStockIsRejected(command.OrderStockItems);
+        orderToUpdate.ApplyStockRejection(command.OrderStockItems, DiscountAllocation.Allocate);
 
         return await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken);
     }

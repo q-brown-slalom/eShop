@@ -61,7 +61,10 @@ public static partial class Extensions
                 metrics.AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
                     .AddRuntimeInstrumentation()
-                    .AddMeter("Experimental.Microsoft.Extensions.AI");
+                    .AddMeter("Experimental.Microsoft.Extensions.AI")
+                    .AddMeter("eShop.BusinessRules.Client")
+                    .AddMeter("eShop.BusinessRules")
+                    .AddMeter("eShop.Ordering");
             })
             .WithTracing(tracing =>
             {

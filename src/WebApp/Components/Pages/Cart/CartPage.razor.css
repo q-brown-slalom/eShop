@@ -255,6 +255,17 @@
     font-size: var(--text-sm);
 }
 
+.cart-item-promotion {
+    display: inline-block;
+    margin-top: 0.35rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-pill);
+    background: var(--color-success-tint);
+    color: var(--color-success);
+    font-size: var(--text-xs);
+    font-weight: 600;
+}
+
 /* ==========================================================================
    Summary (sticky card on desktop)
    ========================================================================== */
