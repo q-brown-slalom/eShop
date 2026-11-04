@@ -16,9 +16,20 @@ test('place an order through checkout', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Checkout' })).toBeVisible();
   await expect(page.getByLabel('Address')).toHaveValue('15703 NE 61st Ct');
   await expect(page.getByLabel('City')).toHaveValue('Redmond');
+  const checkoutTotal = (await page.locator('.checkout-total').innerText()).trim();
+  expect(checkoutTotal).toMatch(/^\$[\d,]+\.\d{2}$/);
   await page.getByRole('button', { name: 'Place order' }).click();
 
   await expect(page).toHaveURL(/\/user\/orders$/);
   await expect(page.getByRole('heading', { name: 'Orders', exact: true })).toBeVisible();
   await expect(page.locator('.order-number')).toHaveCount(existingOrderCount + 1);
+
+  // The newest order (highest number) must be charged exactly the total shown at checkout.
+  const orders = await page.locator('.orders-item:not(.orders-header)').evaluateAll(rows =>
+    rows.map(row => ({
+      number: Number(row.querySelector('.order-number')?.textContent?.trim()),
+      total: row.querySelector('.order-total')?.textContent?.trim() ?? '',
+    })));
+  const newest = orders.reduce((latest, order) => (order.number > latest.number ? order : latest));
+  expect(newest.total).toBe(checkoutTotal);
 });

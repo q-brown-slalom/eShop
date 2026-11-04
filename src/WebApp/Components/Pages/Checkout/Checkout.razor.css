@@ -95,6 +95,39 @@
     height: 1.1rem;
 }
 
+.checkout-totals {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0;
+    max-width: 44rem;
+}
+
+.checkout-totals > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    color: var(--color-ink-2);
+}
+
+.checkout-totals dd {
+    margin: 0;
+}
+
+.checkout-totals .checkout-total-row {
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--color-line);
+    color: var(--color-ink);
+    font-weight: 700;
+    font-size: var(--text-lg);
+}
+
+.checkout-prices-changed {
+    margin: 0;
+    color: var(--color-danger);
+    font-weight: 600;
+}
+
 @media only screen and (max-width: 640px) {
     .form-group {
         flex-direction: column;

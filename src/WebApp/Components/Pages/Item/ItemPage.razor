@@ -4,6 +4,7 @@
 @inject BasketState BasketState
 @inject NavigationManager Nav
 @inject IProductImageUrlProvider ProductImages
+@inject IProductPriceProvider PriceProvider
 
 @if (item is not null)
 {
@@ -38,7 +39,7 @@
 
                 <form class="add-to-cart" method="post" @formname="add-to-cart" @onsubmit="@AddToCartAsync" data-enhance="@isLoggedIn">
                     <AntiforgeryToken />
-                    <span class="price">$@item.Price.ToPriceDisplay()</span>
+                    <span class="price">$@((displayPrice ?? item.Price).ToPriceDisplay())</span>
 
                     @if (isLoggedIn)
                     {
@@ -93,6 +94,7 @@ else if (notFound)
 
 @code {
     private CatalogItem? item;
+    private decimal? displayPrice;
     private int numInCart;
     private bool isLoggedIn;
     private bool notFound;
@@ -112,6 +114,10 @@ else if (notFound)
         {
             isLoggedIn = HttpContext?.User.Identity?.IsAuthenticated == true;
             item = await CatalogService.GetCatalogItem(ItemId);
+            if (item is not null)
+            {
+                displayPrice = (await PriceProvider.GetDisplayPricesAsync([item.Id])).TryGetValue(item.Id, out var price) ? price : null;
+            }
             await UpdateNumInCartAsync();
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)

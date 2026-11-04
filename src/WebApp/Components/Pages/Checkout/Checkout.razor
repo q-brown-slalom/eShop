@@ -51,6 +51,37 @@
                 </div>
             </div>
             <div class="form-section">
+                <h2>Order summary</h2>
+                @if (pricesChanged)
+                {
+                    <p class="checkout-prices-changed" role="alert">Prices have changed since you reviewed your order. Check the new total and place your order again.</p>
+                }
+                @if (quote is not null)
+                {
+                    <dl class="checkout-totals">
+                        <div>
+                            <dt>Subtotal</dt>
+                            <dd class="checkout-subtotal">$@quote.Subtotal.ToPriceDisplay()</dd>
+                        </div>
+                        <div>
+                            <dt>Discount</dt>
+                            <dd class="checkout-discount">@(quote.DiscountTotal > 0 ? "-" : "")$@quote.DiscountTotal.ToPriceDisplay()</dd>
+                        </div>
+                        <div>
+                            <dt>Shipping</dt>
+                            <dd class="checkout-shipping">$@quote.ShippingFee.ToPriceDisplay()</dd>
+                        </div>
+                        <div class="checkout-total-row">
+                            <dt>Total</dt>
+                            <dd class="checkout-total">$@quote.Total.ToPriceDisplay()</dd>
+                        </div>
+                    </dl>
+                }
+                @* The total the shopper saw; Ordering.API only creates the order if it still prices it the same. *@
+                <input type="hidden" name="Info.ExpectedTotal" value="@Info.ExpectedTotal.ToString(CultureInfo.InvariantCulture)" />
+                <input type="hidden" name="Info.RequestId" value="@Info.RequestId" />
+            </div>
+            <div class="form-section">
                 <div class="form-buttons">
                     <a href="cart" class="button button-secondary"><img role="presentation" src="icons/arrow-left.svg" />Back to the shopping bag</a>
                     <button class="button button-primary" type="submit">Place order</button>
@@ -64,6 +95,8 @@
 @code {
     private EditContext editContext = default!;
     private ValidationMessageStore extraMessages = default!;
+    private PriceQuote? quote;
+    private bool pricesChanged;
 
     [SupplyParameterFromForm]
     public BasketCheckoutInfo Info { get; set; } = default!;
@@ -71,15 +104,23 @@
     [CascadingParameter]
     public HttpContext HttpContext { get; set; } = default!;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        if (Info is null)
+        var isFirstVisit = Info is null;
+        if (isFirstVisit)
         {
             PopulateFormWithDefaultInfo();
         }
 
         editContext = new EditContext(Info!);
         extraMessages = new ValidationMessageStore(editContext);
+
+        // Checkout requires a server quote (D7). A post keeps the total that was shown in Info.ExpectedTotal.
+        quote = await Basket.GetQuoteAsync();
+        if (isFirstVisit)
+        {
+            Info!.ExpectedTotal = quote?.Total ?? 0;
+        }
     }
 
     private void PopulateFormWithDefaultInfo()
@@ -111,7 +152,19 @@
     private async Task HandleValidSubmitAsync()
     {
         Info.CardTypeId = 1;
-        await Basket.CheckoutAsync(Info);
+        try
+        {
+            await Basket.CheckoutAsync(Info);
+        }
+        catch (PricesChangedException ex)
+        {
+            // Keep the basket and show the fresh quote; placing the order again submits its total.
+            pricesChanged = true;
+            quote = ex.Quote;
+            Info.ExpectedTotal = ex.Quote.Total;
+            return;
+        }
+
         Nav.NavigateTo("user/orders");
     }
 

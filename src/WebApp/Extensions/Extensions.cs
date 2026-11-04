@@ -35,9 +35,21 @@ public static class Extensions
             .AddApiVersion(2.0)
             .AddAuthToken();
 
-        builder.Services.AddHttpClient<OrderingService>(o => o.BaseAddress = new("https+http://ordering-api"))
+        builder.Services.AddOrderingApiClients();
+    }
+
+    public static void AddOrderingApiClients(this IServiceCollection services)
+    {
+        services.AddHttpClient<PricingService>(o => o.BaseAddress = new("https+http://ordering-api"))
             .AddApiVersion(1.0)
             .AddAuthToken();
+
+        // Create order v2 maps every orders route, so the whole ordering client moves to 2.0 (D6).
+        services.AddHttpClient<OrderingService>(o => o.BaseAddress = new("https+http://ordering-api"))
+            .AddApiVersion(2.0)
+            .AddAuthToken();
+
+        services.AddScoped<IProductPriceProvider, QuotePriceProvider>();
     }
 
     public static void AddEventBusSubscriptions(this IEventBusBuilder eventBus)
