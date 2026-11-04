@@ -154,7 +154,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-The rules journeys (`PromotionTest`, `PartialFulfilmentTest`) publish and then restore rules through BusinessRules.API as `USERNAME1`. They read optional `IDENTITY_URL` (default `http://localhost:5223`) and `BUSINESSRULES_URL` (default `http://localhost:5230`) from the environment or `.env`.
+The rules journeys (`PromotionTest`, `PartialFulfilmentTest`) publish and then restore rules through BusinessRules.API as `USERNAME1`. They read optional `IDENTITY_URL` (default `http://localhost:5223`) and `BUSINESSRULES_URL` (default `http://localhost:5230`) from the environment or `.env`. Start the AppHost with `ESHOP_USE_HTTP_ENDPOINTS=1` for these journeys so Identity is served at `http://localhost:5223`, BusinessRules.API trusts that issuer, and the https redirect is avoided (see `.github/workflows/playwright.yml` and `src/eShop.AppHost/AppHost.cs`).
 
 ### Optional: AI Chatbot with Microsoft Foundry
 
