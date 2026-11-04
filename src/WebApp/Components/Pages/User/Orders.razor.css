@@ -70,6 +70,7 @@
 .orders-item {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 1.75rem;
     align-self: stretch;
     padding: 1.1rem 0;
@@ -108,6 +109,13 @@
     text-align: right;
     font-size: var(--text-base);
     font-weight: 700;
+}
+
+.order-dropped {
+    flex: 1 0 100%;
+    margin: 0;
+    color: var(--color-danger);
+    font-size: var(--text-sm);
 }
 
 .order-status .status {

@@ -21,6 +21,11 @@ class OrderEntityTypeConfiguration : IEntityTypeConfiguration<Order>
             .HasMaxLength(30);
 
         orderConfiguration
+            .Property(o => o.StockShortfallPolicy)
+            .HasConversion<string>()
+            .HasMaxLength(30);
+
+        orderConfiguration
             .Property(o => o.PaymentId)
             .HasColumnName("PaymentMethodId");
 

@@ -28,8 +28,7 @@ internal static class Extensions
             .AddApiVersion(1.0)
             .AddServiceToken(OrderingUsageScope);
 
-        // Rule types are registered in code with AddRuleType<T>(); phase 1 registers none (D1).
-        services.TryAddSingleton<RuleTypeRegistry>();
+        services.AddBusinessRuleTypes();
         services.TryAddSingleton(TimeProvider.System);
         services.AddValidatorsFromAssemblyContaining<CreateDraftRequestValidator>();
 

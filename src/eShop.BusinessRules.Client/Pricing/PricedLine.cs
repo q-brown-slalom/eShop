@@ -8,7 +8,8 @@ public sealed record PricedLine(
     decimal BasePrice,
     decimal UnitPrice,
     decimal Discount,
-    string? PromotionLabel)
+    string? PromotionLabel,
+    decimal OrderDiscountShare = 0m)
 {
     public decimal LineTotal => Units * UnitPrice - Discount;
 }

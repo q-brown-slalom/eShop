@@ -47,9 +47,7 @@ namespace eShop.OrderProcessor.Services
                 logger.LogDebug("Checking confirmed grace period orders");
             }
 
-            var orderIds = await repository.GetConfirmedGracePeriodOrdersAsync(
-                TimeSpan.FromMinutes(_options.GracePeriodTime),
-                cancellationToken);
+            var orderIds = await repository.GetConfirmedGracePeriodOrdersAsync(cancellationToken);
 
             foreach (var orderId in orderIds)
             {

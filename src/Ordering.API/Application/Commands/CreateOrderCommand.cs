@@ -82,7 +82,9 @@ public class CreateOrderCommand
             BasePrice = line.BasePrice,
             UnitPrice = line.UnitPrice,
             Discount = line.Discount,
-            Units = line.Units
+            Units = line.Units,
+            PromotionLabel = line.PromotionLabel,
+            OrderDiscountShare = line.OrderDiscountShare
         }).ToList();
         ShippingFee = quote.ShippingFee;
         PricingSnapshotVersion = quote.SnapshotVersion;

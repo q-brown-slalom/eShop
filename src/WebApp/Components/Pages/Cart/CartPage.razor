@@ -44,6 +44,10 @@
                         <div class="catalog-item-content">
                             <p class="name">@item.ProductName</p>
                             <p class="price">$@item.UnitPrice.ToPriceDisplay()</p>
+                            @if (PromotionLabel(item) is { } promotionLabel)
+                            {
+                                <span class="cart-item-promotion">@promotionLabel</span>
+                            }
                         </div>
                     </div>
                     <div class="catalog-item-quantity">
@@ -130,6 +134,9 @@
         => quote?.Lines.FirstOrDefault(l => l.ProductId == item.ProductId && l.Units == quantity) is { } line
         ? line.LineTotal
         : item.UnitPrice * quantity;
+
+    private string? PromotionLabel(BasketItem item)
+        => quote?.Lines.FirstOrDefault(l => l.ProductId == item.ProductId)?.PromotionLabel;
 
     // While an update post is in process, we want to show the pending quantity, not the one
     // that is committed to the cart (otherwise the UI briefly shows the old data)
