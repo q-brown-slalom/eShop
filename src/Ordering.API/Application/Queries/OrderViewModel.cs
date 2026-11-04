@@ -5,8 +5,10 @@ public record Orderitem
     public string ProductName { get; init; }
     public int Units { get; init; }
     public double UnitPrice { get; init; }
+    public decimal BasePrice { get; init; }
     public decimal Discount { get; init; }
     public string PromotionLabel { get; init; }
+    public bool IsUnfulfillable { get; init; }
     public string PictureUrl { get; init; }
 }
 
@@ -34,6 +36,7 @@ public record OrderSummary
     public DateTime Date { get; init; }
     public string Status { get; init; }
     public double Total { get; init; }
+    public List<string> DroppedItems { get; init; } = [];
 }
 
 public record CardType

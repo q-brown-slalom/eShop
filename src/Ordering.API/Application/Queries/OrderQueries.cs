@@ -33,7 +33,9 @@ public class OrderQueries(OrderingContext context)
                 Units = oi.Units,
                 UnitPrice = (double)oi.UnitPrice,
                 Discount = oi.Discount,
+                BasePrice = oi.BasePrice,
                 PromotionLabel = oi.PromotionLabel,
+                IsUnfulfillable = oi.IsUnfulfillable,
                 PictureUrl = oi.PictureUrl
             }).ToList()
         };
@@ -48,7 +50,8 @@ public class OrderQueries(OrderingContext context)
                 OrderNumber = o.Id,
                 Date = o.OrderDate,
                 Status = o.OrderStatus.ToString(),
-                Total = (double)o.Total
+                Total = (double)o.Total,
+                DroppedItems = o.OrderItems.Where(i => i.IsUnfulfillable).Select(i => i.ProductName).ToList()
             })
             .ToListAsync();
     } 
