@@ -26,7 +26,7 @@ public static class BusinessRulesClientExtensions
         var services = builder.Services;
 
         services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton<RuleTypeRegistry>();
+        services.AddBusinessRuleTypes();
         services.TryAddSingleton<PricingCalculator>();
 
         services.AddOptions<BusinessRulesClientOptions>().BindConfiguration(BusinessRulesClientOptions.SectionName);
