@@ -296,7 +296,7 @@ public static class OrdersApi
         {
             var requestCreateOrder = new IdentifiedCommand<CreateOrderCommand, bool>(command, requestId);
 
-            // The command is not logged: it carries the card holder and address.
+            // The command is not logged here or by the MediatR pipeline: it carries the card holder and address.
             services.Logger.LogInformation(
                 "Sending command: {CommandName} - {IdProperty}: {CommandId}",
                 requestCreateOrder.GetGenericTypeName(),

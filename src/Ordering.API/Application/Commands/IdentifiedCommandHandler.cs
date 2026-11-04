@@ -53,11 +53,12 @@ public abstract class IdentifiedCommandHandler<T, R> : IRequestHandler<Identifie
                 var idProperty = string.Empty;
                 var commandId = string.Empty;
 
+                // Only identifiers are logged, never the command: CreateOrderCommand carries card and address data.
                 switch (command)
                 {
-                    case CreateOrderCommand createOrderCommand:
-                        idProperty = nameof(createOrderCommand.UserId);
-                        commandId = createOrderCommand.UserId;
+                    case CreateOrderCommand:
+                        idProperty = "RequestId";
+                        commandId = $"{message.Id}";
                         break;
 
                     case CancelOrderCommand cancelOrderCommand:
@@ -77,22 +78,20 @@ public abstract class IdentifiedCommandHandler<T, R> : IRequestHandler<Identifie
                 }
 
                 _logger.LogInformation(
-                    "Sending command: {CommandName} - {IdProperty}: {CommandId} ({@Command})",
+                    "Sending command: {CommandName} - {IdProperty}: {CommandId}",
                     commandName,
                     idProperty,
-                    commandId,
-                    command);
+                    commandId);
 
                 // Send the embedded business command to mediator so it runs its related CommandHandler 
                 result = await _mediator.Send(command, cancellationToken);
 
                 _logger.LogInformation(
-                    "Command result: {@Result} - {CommandName} - {IdProperty}: {CommandId} ({@Command})",
+                    "Command result: {@Result} - {CommandName} - {IdProperty}: {CommandId}",
                     result,
                     commandName,
                     idProperty,
-                    commandId,
-                    command);
+                    commandId);
             }
             catch
             {

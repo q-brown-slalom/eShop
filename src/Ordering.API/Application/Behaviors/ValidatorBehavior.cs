@@ -27,7 +27,9 @@ public class ValidatorBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest
 
         if (failures.Any())
         {
-            _logger.LogWarning("Validation errors - {CommandType} - Command: {@Command} - Errors: {@ValidationErrors}", typeName, request, failures);
+            // Neither the command nor the failures' attempted values are logged: they can hold card and address data.
+            _logger.LogWarning("Validation errors - {CommandType} - Errors: {ValidationErrors}", typeName,
+                string.Join("; ", failures.Select(f => $"{f.PropertyName}: {f.ErrorMessage}")));
 
             throw new OrderingDomainException(
                 $"Command Validation Errors for type {typeof(TRequest).Name}", new ValidationException("Validation exception", failures));
