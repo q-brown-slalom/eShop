@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -22,7 +22,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
 {
     private readonly WebApplicationFactory<Program> _webApplicationFactory;
     private readonly HttpClient _httpClient;
-    private readonly HttpClient _httpClientV2;
+    private readonly TestBuyerOrders _testBuyerOrders;
 
     public OrderingApiTests(OrderingApiFixture fixture)
     {
@@ -30,7 +30,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
 
         _webApplicationFactory = fixture;
         _httpClient = _webApplicationFactory.CreateDefaultClient(handler);
-        _httpClientV2 = _webApplicationFactory.CreateDefaultClient(new ApiVersionHandler(new QueryStringApiVersionWriter(), new ApiVersion(2.0)));
+        _testBuyerOrders = new TestBuyerOrders(fixture);
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -181,10 +181,10 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
     {
         try
         {
-            var response = await PostOrderV2Async(Guid.NewGuid(), [new QuoteLine(1, 2), new QuoteLine(3, 1)], expectedTotal: 25.25m);
+            var response = await _testBuyerOrders.PostV2Async(Guid.NewGuid(), [new QuoteLine(1, 2), new QuoteLine(3, 1)], expectedTotal: 25.25m);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var order = await GetSingleTestBuyerOrderAsync();
+            var order = await _testBuyerOrders.GetSingleAsync();
             Assert.Equal(25.25m, order.Total);
             Assert.Equal(25.25m, order.Subtotal);
             Assert.Equal(0m, order.ShippingFee);
@@ -194,7 +194,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -205,7 +205,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         {
             var requestId = Guid.NewGuid();
 
-            var response = await PostOrderV2Async(requestId, [new QuoteLine(1, 2), new QuoteLine(3, 1)], expectedTotal: 20.00m);
+            var response = await _testBuyerOrders.PostV2Async(requestId, [new QuoteLine(1, 2), new QuoteLine(3, 1)], expectedTotal: 20.00m);
 
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
             Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
@@ -214,12 +214,12 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
             var quote = problem.RootElement.GetProperty("quote");
             Assert.Equal(25.25m, quote.GetProperty("total").GetDecimal());
             Assert.Equal(2, quote.GetProperty("lines").GetArrayLength());
-            Assert.Empty(await GetTestBuyerOrdersAsync());
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
             Assert.False(await ClientRequestExistsAsync(requestId));
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -228,18 +228,18 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
     {
         try
         {
-            var response = await PostOrderV2Async(Guid.NewGuid(), [new QuoteLine(1, 1), new QuoteLine(777, 1)], expectedTotal: 10.00m);
+            var response = await _testBuyerOrders.PostV2Async(Guid.NewGuid(), [new QuoteLine(1, 1), new QuoteLine(777, 1)], expectedTotal: 10.00m);
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
             var problem = await response.Content.ReadFromJsonAsync<HttpValidationProblemDetails>(TestContext.Current.CancellationToken);
             var message = Assert.Single(Assert.Contains("items", problem.Errors));
             Assert.Contains("777", message);
-            Assert.Empty(await GetTestBuyerOrdersAsync());
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -251,19 +251,19 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
             var requestId = Guid.NewGuid();
             List<QuoteLine> items = [new QuoteLine(2, 1)];
 
-            var conflict = await PostOrderV2Async(requestId, items, expectedTotal: 19.99m);
+            var conflict = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 19.99m);
             Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
 
-            var retry = await PostOrderV2Async(requestId, items, expectedTotal: 20.50m);
+            var retry = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
 
             Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
-            var order = await GetSingleTestBuyerOrderAsync();
+            var order = await _testBuyerOrders.GetSingleAsync();
             Assert.Equal(20.50m, order.Total);
             Assert.True(await ClientRequestExistsAsync(requestId));
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -275,21 +275,21 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
             var requestId = Guid.NewGuid();
             List<QuoteLine> items = [new QuoteLine(2, 1)];
 
-            var failed = await PostOrderV2Async(requestId, items, expectedTotal: 20.50m, cardExpiration: DateTime.UtcNow.AddYears(-1));
+            var failed = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m, cardExpiration: DateTime.UtcNow.AddYears(-1));
             Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
-            Assert.Empty(await GetTestBuyerOrdersAsync());
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
             Assert.False(await ClientRequestExistsAsync(requestId));
 
-            var retry = await PostOrderV2Async(requestId, items, expectedTotal: 20.50m);
+            var retry = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
 
             Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
-            var order = await GetSingleTestBuyerOrderAsync();
+            var order = await _testBuyerOrders.GetSingleAsync();
             Assert.Equal(20.50m, order.Total);
             Assert.True(await ClientRequestExistsAsync(requestId));
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -303,7 +303,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
             var response = await PostOrderV1Async(Guid.NewGuid(), item);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var order = await GetSingleTestBuyerOrderAsync();
+            var order = await _testBuyerOrders.GetSingleAsync();
             Assert.Equal(41.00m, order.Total);
             var line = Assert.Single(order.OrderItems);
             Assert.Equal(20.50, line.UnitPrice);
@@ -311,7 +311,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -339,7 +339,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
     }
 
@@ -475,15 +475,6 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         return JsonSerializer.Serialize(order);
     }
 
-    private async Task<HttpResponseMessage> PostOrderV2Async(Guid requestId, List<QuoteLine> items, decimal expectedTotal, DateTime? cardExpiration = null)
-    {
-        var body = new CreateOrderV2Request(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345",
-            "4012888888881881", "Test User", cardExpiration ?? DateTime.UtcNow.AddYears(1), "123", 1, "test buyer", items, expectedTotal);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/orders") { Content = JsonContent.Create(body) };
-        request.Headers.Add("x-requestid", requestId.ToString());
-        return await _httpClientV2.SendAsync(request, TestContext.Current.CancellationToken);
-    }
-
     private async Task<HttpResponseMessage> PostOrderV1Async(Guid requestId, params BasketItem[] items)
     {
         var body = new CreateOrderRequest(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345",
@@ -493,41 +484,10 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         return await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
     }
 
-    private async Task<List<OrderSummary>> GetTestBuyerOrdersAsync()
-    {
-        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        return await _httpClient.GetFromJsonAsync<List<OrderSummary>>("api/orders", jsonOptions, TestContext.Current.CancellationToken);
-    }
-
-    private async Task<Order> GetSingleTestBuyerOrderAsync()
-    {
-        var summary = Assert.Single(await GetTestBuyerOrdersAsync());
-        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        return await _httpClient.GetFromJsonAsync<Order>($"api/orders/{summary.OrderNumber}", jsonOptions, TestContext.Current.CancellationToken);
-    }
-
     private async Task<bool> ClientRequestExistsAsync(Guid requestId)
     {
         using var scope = _webApplicationFactory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
         return await context.Set<ClientRequest>().AnyAsync(r => r.Id == requestId, TestContext.Current.CancellationToken);
-    }
-
-    // Created orders are removed so tests that expect no orders (or seed this buyer) stay independent of run order.
-    private async Task DeleteTestBuyerOrdersAsync()
-    {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var scope = _webApplicationFactory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
-        var identity = AutoAuthorizeMiddleware.IDENTITY_ID;
-        await context.Database.ExecuteSqlAsync(
-            $"""DELETE FROM ordering.orders WHERE "BuyerId" IN (SELECT "Id" FROM ordering.buyers WHERE "IdentityGuid" = {identity})""",
-            cancellationToken);
-        await context.Database.ExecuteSqlAsync(
-            $"""DELETE FROM ordering.paymentmethods WHERE "BuyerId" IN (SELECT "Id" FROM ordering.buyers WHERE "IdentityGuid" = {identity})""",
-            cancellationToken);
-        await context.Database.ExecuteSqlAsync(
-            $"""DELETE FROM ordering.buyers WHERE "IdentityGuid" = {identity}""",
-            cancellationToken);
     }
 }

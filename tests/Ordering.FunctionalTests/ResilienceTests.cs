@@ -1,14 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json;
 using Asp.Versioning;
 using Asp.Versioning.Http;
 using eShop.BusinessRules.Client.Pricing;
 using eShop.BusinessRules.Client.Snapshot;
-using eShop.Ordering.API.Application.Models;
-using eShop.Ordering.API.Application.Queries;
-using eShop.Ordering.Infrastructure;
-using Microsoft.EntityFrameworkCore;
 
 namespace eShop.Ordering.FunctionalTests;
 
@@ -17,13 +12,13 @@ public sealed class ResilienceTests : IClassFixture<OrderingApiFixture>
 {
     private readonly OrderingApiFixture _fixture;
     private readonly HttpClient _httpClientV1;
-    private readonly HttpClient _httpClientV2;
+    private readonly TestBuyerOrders _testBuyerOrders;
 
     public ResilienceTests(OrderingApiFixture fixture)
     {
         _fixture = fixture;
         _httpClientV1 = fixture.CreateDefaultClient(new ApiVersionHandler(new QueryStringApiVersionWriter(), new ApiVersion(1.0)));
-        _httpClientV2 = fixture.CreateDefaultClient(new ApiVersionHandler(new QueryStringApiVersionWriter(), new ApiVersion(2.0)));
+        _testBuyerOrders = new TestBuyerOrders(fixture);
     }
 
     [Fact]
@@ -46,10 +41,10 @@ public sealed class ResilienceTests : IClassFixture<OrderingApiFixture>
             Assert.Equal(0, quote.SnapshotVersion);
             Assert.Equal(43.97m, quote.Total);
 
-            var createResponse = await PostOrderV2Async(items, quote.Total);
+            var createResponse = await _testBuyerOrders.PostV2Async(Guid.NewGuid(), items, quote.Total);
 
             Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
-            var order = await GetSingleTestBuyerOrderAsync();
+            var order = await _testBuyerOrders.GetSingleAsync();
             Assert.Equal(43.97m, order.Total);
             Assert.Equal(0m, order.ShippingFee);
             Assert.Collection(order.OrderItems.OrderBy(i => i.UnitPrice),
@@ -58,41 +53,7 @@ public sealed class ResilienceTests : IClassFixture<OrderingApiFixture>
         }
         finally
         {
-            await DeleteTestBuyerOrdersAsync();
+            await _testBuyerOrders.DeleteAllAsync();
         }
-    }
-
-    private async Task<HttpResponseMessage> PostOrderV2Async(List<QuoteLine> items, decimal expectedTotal)
-    {
-        var body = new CreateOrderV2Request(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345",
-            "4012888888881881", "Test User", DateTime.UtcNow.AddYears(1), "123", 1, "test buyer", items, expectedTotal);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/orders") { Content = JsonContent.Create(body) };
-        request.Headers.Add("x-requestid", Guid.NewGuid().ToString());
-        return await _httpClientV2.SendAsync(request, TestContext.Current.CancellationToken);
-    }
-
-    private async Task<Order> GetSingleTestBuyerOrderAsync()
-    {
-        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        var orders = await _httpClientV1.GetFromJsonAsync<List<OrderSummary>>("api/orders", jsonOptions, TestContext.Current.CancellationToken);
-        var summary = Assert.Single(orders);
-        return await _httpClientV1.GetFromJsonAsync<Order>($"api/orders/{summary.OrderNumber}", jsonOptions, TestContext.Current.CancellationToken);
-    }
-
-    private async Task DeleteTestBuyerOrdersAsync()
-    {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        using var scope = _fixture.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
-        var identity = AutoAuthorizeMiddleware.IDENTITY_ID;
-        await context.Database.ExecuteSqlAsync(
-            $"""DELETE FROM ordering.orders WHERE "BuyerId" IN (SELECT "Id" FROM ordering.buyers WHERE "IdentityGuid" = {identity})""",
-            cancellationToken);
-        await context.Database.ExecuteSqlAsync(
-            $"""DELETE FROM ordering.paymentmethods WHERE "BuyerId" IN (SELECT "Id" FROM ordering.buyers WHERE "IdentityGuid" = {identity})""",
-            cancellationToken);
-        await context.Database.ExecuteSqlAsync(
-            $"""DELETE FROM ordering.buyers WHERE "IdentityGuid" = {identity}""",
-            cancellationToken);
     }
 }
