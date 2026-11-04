@@ -154,6 +154,8 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
+The rules journeys (`PromotionTest`, `PartialFulfilmentTest`) publish and then restore rules through BusinessRules.API as `USERNAME1`. They read optional `IDENTITY_URL` (default `http://localhost:5223`) and `BUSINESSRULES_URL` (default `http://localhost:5230`) from the environment or `.env`.
+
 ### Optional: AI Chatbot with Microsoft Foundry
 
 This option provisions a Microsoft Foundry resource during local development, so first authenticate to Azure and configure the subscription and location:

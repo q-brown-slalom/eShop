@@ -52,6 +52,10 @@ else
                         @order.Status
                     </span>
                 </div>
+                @if (order.DroppedItems is { Length: > 0 })
+                {
+                    <p class="order-dropped">Removed (out of stock): @string.Join(", ", order.DroppedItems)</p>
+                }
             </li>
         }
     </ul>

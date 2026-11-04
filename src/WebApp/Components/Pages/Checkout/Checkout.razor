@@ -64,7 +64,7 @@
                             <dd class="checkout-subtotal">$@quote.Subtotal.ToPriceDisplay()</dd>
                         </div>
                         <div>
-                            <dt>Discount</dt>
+                            <dt>Discount@(string.IsNullOrEmpty(quote.OrderPromotionLabel) ? "" : $" ({quote.OrderPromotionLabel})")</dt>
                             <dd class="checkout-discount">@(quote.DiscountTotal > 0 ? "-" : "")$@quote.DiscountTotal.ToPriceDisplay()</dd>
                         </div>
                         <div>

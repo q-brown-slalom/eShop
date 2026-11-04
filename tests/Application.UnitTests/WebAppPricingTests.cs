@@ -105,6 +105,22 @@ public class WebAppPricingTests
     }
 
     [TestMethod]
+    public async Task OrderRecordDeserializesDroppedItems()
+    {
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, new object[]
+        {
+            new { orderNumber = 1, date = DateTime.UtcNow, status = "Paid", total = 99.5m, droppedItems = new[] { "Adventurer GPS Watch" } },
+            new { orderNumber = 2, date = DateTime.UtcNow, status = "Paid", total = 10m }
+        }));
+        using var services = BuildServices(handler);
+
+        var orders = await services.GetRequiredService<OrderingService>().GetOrders();
+
+        CollectionAssert.AreEqual(new[] { "Adventurer GPS Watch" }, orders[0].DroppedItems);
+        Assert.IsNull(orders[1].DroppedItems);
+    }
+
+    [TestMethod]
     public async Task QuotePriceProviderReturnsEmptyOnFailure()
     {
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));

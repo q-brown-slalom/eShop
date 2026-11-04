@@ -87,7 +87,8 @@ public record OrderRecord(
     int OrderNumber,
     DateTime Date,
     string Status,
-    decimal Total);
+    decimal Total,
+    string[]? DroppedItems = null);
 
 public record CreateOrderV2Request(
     string UserId,
