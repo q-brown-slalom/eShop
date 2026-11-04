@@ -1,4 +1,5 @@
-﻿using Aspire.Hosting;
+﻿using System.Reflection;
+using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using eShop.BusinessRules.Client.Snapshot;
 using eShop.Ordering.API.Application.Pricing;
@@ -24,6 +25,11 @@ public sealed class OrderingApiFixture : WebApplicationFactory<Program>, IAsyncL
 
     public OrderingApiFixture()
     {
+        // IntegrationEventLogService resolves integration event types from the entry assembly. In production that is
+        // Ordering.API; under the test runner it is this test assembly, so publishing after a committed create-order
+        // failed with a 500. Point the entry assembly at Ordering.API, as in production.
+        Assembly.SetEntryAssembly(typeof(Program).Assembly);
+
         var options = new DistributedApplicationOptions { AssemblyName = typeof(OrderingApiFixture).Assembly.FullName, DisableDashboard = true };
         var appBuilder = DistributedApplication.CreateBuilder(options);
         Postgres = appBuilder.AddPostgres("OrderingDB");
