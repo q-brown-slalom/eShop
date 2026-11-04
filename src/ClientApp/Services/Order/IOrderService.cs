@@ -1,10 +1,13 @@
 using eShop.ClientApp.Models.Basket;
+using eShop.ClientApp.Models.Pricing;
 
 namespace eShop.ClientApp.Services.Order;
 
 public interface IOrderService
 {
-    Task CreateOrderAsync(Models.Orders.Order newOrder);
+    Task<PriceQuote> GetQuoteAsync(IEnumerable<QuoteLine> lines);
+
+    Task<CreateOrderResult> CreateOrderAsync(Models.Orders.Order newOrder, decimal expectedTotal);
 
     Task<IEnumerable<Models.Orders.Order>> GetOrdersAsync();
 

@@ -27,4 +27,5 @@ global using eShop.Ordering.Domain.SeedWork;
 global using eShop.Ordering.Infrastructure;
 global using eShop.Ordering.Infrastructure.Idempotency;
 global using eShop.Ordering.Infrastructure.Repositories;
+global using eShop.Ordering.Infrastructure.Usage;
 global using eShop.ServiceDefaults;

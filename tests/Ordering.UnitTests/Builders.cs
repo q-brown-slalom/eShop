@@ -33,9 +33,16 @@ public class OrderBuilder
         decimal unitPrice,
         decimal discount,
         string pictureUrl,
-        int units = 1)
+        int units = 1,
+        decimal? basePrice = null)
     {
-        order.AddOrderItem(productId, productName, unitPrice, discount, pictureUrl, units);
+        order.AddOrderItem(productId, productName, unitPrice, discount, pictureUrl, units, basePrice);
+        return this;
+    }
+
+    public OrderBuilder WithPricing(decimal shippingFee, long pricingSnapshotVersion)
+    {
+        order.ApplyPricing(shippingFee, pricingSnapshotVersion);
         return this;
     }
 

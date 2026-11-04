@@ -1,6 +1,7 @@
 @page "/"
 @inject NavigationManager Nav
 @inject CatalogService CatalogService
+@inject IProductPriceProvider PriceProvider
 @attribute [StreamRendering]
 
 <PageTitle>AdventureWorks</PageTitle>
@@ -85,7 +86,7 @@
             <div class="catalog-items">
                 @foreach (var item in catalogResult.Data)
                 {
-                    <CatalogListItem Item="@item" />
+                    <CatalogListItem Item="@item" DisplayPrice="@DisplayPriceFor(item)" />
                 }
             </div>
 
@@ -160,6 +161,7 @@
     public int[]? TypeIds { get; set; }
 
     CatalogResult? catalogResult;
+    IReadOnlyDictionary<int, decimal> displayPrices = new Dictionary<int, decimal>();
 
     static IEnumerable<int> GetPageTokens(int totalPages, int current)
     {
@@ -193,12 +195,19 @@
         { "type", null },
     });
 
+    private decimal? DisplayPriceFor(CatalogItem item)
+        => displayPrices.TryGetValue(item.Id, out var price) ? price : null;
+
     protected override async Task OnInitializedAsync()
     {
-        catalogResult = await CatalogService.GetCatalogItems(
+        var result = await CatalogService.GetCatalogItems(
             Page.GetValueOrDefault(1) - 1,
             PageSize,
             BrandIds,
             TypeIds);
+
+        // Quote before showing the page so prices don't flip from catalog to quoted while streaming.
+        displayPrices = await PriceProvider.GetDisplayPricesAsync(result.Data.Select(i => i.Id).ToList());
+        catalogResult = result;
     }
 }

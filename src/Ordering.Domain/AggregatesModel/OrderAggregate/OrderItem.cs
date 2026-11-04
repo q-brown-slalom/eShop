@@ -11,6 +11,8 @@ public class OrderItem
     public string PictureUrl { get; private set;}
     
     public decimal UnitPrice { get; private set;}
+
+    public decimal BasePrice { get; private set; }
     
     public decimal Discount { get; private set; }
     
@@ -20,11 +22,16 @@ public class OrderItem
 
     protected OrderItem() { }
 
-    public OrderItem(int productId, string productName, decimal unitPrice, decimal discount, string pictureUrl, int units = 1)
+    public OrderItem(int productId, string productName, decimal unitPrice, decimal discount, string pictureUrl, int units = 1, decimal? basePrice = null)
     {
         if (units <= 0)
         {
             throw new OrderingDomainException("Invalid number of units");
+        }
+
+        if (unitPrice < 0.01m)
+        {
+            throw new OrderingDomainException("The unit price must be at least 0.01");
         }
 
         if ((unitPrice * units) < discount)
@@ -36,6 +43,7 @@ public class OrderItem
 
         ProductName = productName;
         UnitPrice = unitPrice;
+        BasePrice = basePrice ?? unitPrice;
         Discount = discount;
         Units = units;
         PictureUrl = pictureUrl;

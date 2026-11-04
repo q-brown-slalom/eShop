@@ -76,7 +76,7 @@
                         </form>
                     </div>
                     <div class="catalog-item-total">
-                        $@((item.UnitPrice * quantity).ToPriceDisplay())
+                        $@LineTotal(item, quantity).ToPriceDisplay()
                     </div>
                 </div>
             }
@@ -92,7 +92,7 @@
                 </div>
                 <div class="cart-summary-total">
                     <div>Total</div>
-                    <div>$@TotalPrice?.ToPriceDisplay()</div>
+                    <div>$@quote?.Total.ToPriceDisplay()</div>
                 </div>
                 <a href="checkout" class="button button-primary">Check out</a>
                 <a href="" class="cart-summary-link">
@@ -108,6 +108,7 @@
 
 @code {
     private IReadOnlyCollection<BasketItem>? basketItems;
+    private PriceQuote? quote;
 
     [SupplyParameterFromForm]
     public int? UpdateQuantityId { get; set; }
@@ -117,11 +118,18 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // The quote fills each item's unit price, so fetch it first. The cart requires a quote (D7).
+        quote = await Basket.GetQuoteAsync();
         basketItems = await Basket.GetBasketItemsAsync();
     }
 
-    private decimal? TotalPrice => basketItems?.Sum(i => i.Quantity * i.UnitPrice);
     private decimal? TotalQuantity => basketItems?.Sum(i => i.Quantity);
+
+    // Shows the quoted line total; while a quantity update is pending, estimate it from the quoted unit price.
+    private decimal LineTotal(BasketItem item, int quantity)
+        => quote?.Lines.FirstOrDefault(l => l.ProductId == item.ProductId && l.Units == quantity) is { } line
+        ? line.LineTotal
+        : item.UnitPrice * quantity;
 
     // While an update post is in process, we want to show the pending quantity, not the one
     // that is committed to the cart (otherwise the UI briefly shows the old data)
@@ -135,6 +143,7 @@
         var id = UpdateQuantityId!.Value;
         var quantity = UpdateQuantityValue!.Value;
         await Basket.SetQuantityAsync(id, quantity);
+        quote = await Basket.GetQuoteAsync();
         basketItems = await Basket.GetBasketItemsAsync();
     }
 }

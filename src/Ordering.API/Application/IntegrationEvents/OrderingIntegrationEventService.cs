@@ -16,7 +16,7 @@ public class OrderingIntegrationEventService(IEventBus eventBus,
 
         foreach (var logEvt in pendingLogEvents)
         {
-            _logger.LogInformation("Publishing integration event: {IntegrationEventId} - ({@IntegrationEvent})", logEvt.EventId, logEvt.IntegrationEvent);
+            _logger.LogInformation("Publishing integration event: {IntegrationEventId} - ({IntegrationEventType})", logEvt.EventId, logEvt.EventTypeShortName);
 
             try
             {
@@ -35,7 +35,8 @@ public class OrderingIntegrationEventService(IEventBus eventBus,
 
     public async Task AddAndSaveEventAsync(IntegrationEvent evt)
     {
-        _logger.LogInformation("Enqueuing integration event {IntegrationEventId} to repository ({@IntegrationEvent})", evt.Id, evt);
+        // Only the event type is logged: some events carry the buyer's name.
+        _logger.LogInformation("Enqueuing integration event {IntegrationEventId} to repository ({IntegrationEventType})", evt.Id, evt.GetType().Name);
 
         await _eventLogService.SaveEventAsync(evt, _orderingContext.GetCurrentTransaction());
     }

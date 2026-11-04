@@ -57,10 +57,70 @@ public class IdentifiedCommandHandlerTest
        await  _mediator.DidNotReceive().Send(Arg.Any<IRequest<bool>>(), default);
     }
 
+    [TestMethod]
+    public async Task Handler_records_request_after_command_succeeds()
+    {
+        var fakeGuid = Guid.NewGuid();
+        var fakeOrderCmd = new IdentifiedCommand<CreateOrderCommand, bool>(FakeOrderRequest(), fakeGuid);
+
+        _requestManager.ExistAsync(Arg.Any<Guid>())
+            .Returns(Task.FromResult(false));
+
+        _mediator.Send(Arg.Any<IRequest<bool>>(), default)
+            .Returns(Task.FromResult(true));
+
+        var handler = new CreateOrderIdentifiedCommandHandler(_mediator, _requestManager, _loggerMock);
+        await handler.Handle(fakeOrderCmd, CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            _mediator.Send(Arg.Any<IRequest<bool>>(), default);
+            _requestManager.CreateRequestForCommandAsync<CreateOrderCommand>(fakeGuid);
+        });
+    }
+
+    [TestMethod]
+    public async Task Handler_propagates_failure_and_does_not_record_request_when_command_throws()
+    {
+        var fakeGuid = Guid.NewGuid();
+        var fakeOrderCmd = new IdentifiedCommand<CreateOrderCommand, bool>(FakeOrderRequest(), fakeGuid);
+
+        _requestManager.ExistAsync(Arg.Any<Guid>())
+            .Returns(Task.FromResult(false));
+
+        _mediator.Send(Arg.Any<IRequest<bool>>(), default)
+            .Returns(Task.FromException<bool>(new OrderingDomainException("invalid order")));
+
+        var handler = new CreateOrderIdentifiedCommandHandler(_mediator, _requestManager, _loggerMock);
+
+        // The failure must reach TransactionBehavior so it rolls back the command's writes instead of committing them.
+        await Assert.ThrowsExactlyAsync<OrderingDomainException>(() => handler.Handle(fakeOrderCmd, CancellationToken.None));
+        await _requestManager.DidNotReceive().CreateRequestForCommandAsync<CreateOrderCommand>(Arg.Any<Guid>());
+    }
+
+    [TestMethod]
+    public async Task Handler_does_not_record_request_when_command_returns_failure()
+    {
+        var fakeGuid = Guid.NewGuid();
+        var fakeOrderCmd = new IdentifiedCommand<CreateOrderCommand, bool>(FakeOrderRequest(), fakeGuid);
+
+        _requestManager.ExistAsync(Arg.Any<Guid>())
+            .Returns(Task.FromResult(false));
+
+        _mediator.Send(Arg.Any<IRequest<bool>>(), default)
+            .Returns(Task.FromResult(false));
+
+        var handler = new CreateOrderIdentifiedCommandHandler(_mediator, _requestManager, _loggerMock);
+        var result = await handler.Handle(fakeOrderCmd, CancellationToken.None);
+
+        Assert.IsFalse(result);
+        await _requestManager.DidNotReceive().CreateRequestForCommandAsync<CreateOrderCommand>(Arg.Any<Guid>());
+    }
+
     private CreateOrderCommand FakeOrderRequest(Dictionary<string, object> args = null)
     {
         return new CreateOrderCommand(
-            new List<BasketItem>(),
+            new eShop.BusinessRules.Client.Pricing.PriceQuote([], 0m, 0m, 0m, 0m, 0),
             userId: args != null && args.ContainsKey("userId") ? (string)args["userId"] : null,
             userName: args != null && args.ContainsKey("userName") ? (string)args["userName"] : null,
             city: args != null && args.ContainsKey("city") ? (string)args["city"] : null,

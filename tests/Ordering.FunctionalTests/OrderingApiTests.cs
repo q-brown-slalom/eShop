@@ -1,26 +1,40 @@
-﻿using System.Net;
+using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Asp.Versioning;
 using Asp.Versioning.Http;
+using eShop.BusinessRules.Client.Pricing;
+using eShop.IntegrationEventLogEF;
 using eShop.Ordering.API.Application.Commands;
+using eShop.Ordering.API.Application.IntegrationEvents.Events;
 using eShop.Ordering.API.Application.Models;
 using eShop.Ordering.API.Application.Queries;
+using eShop.Ordering.Domain.AggregatesModel.BuyerAggregate;
+using eShop.Ordering.Infrastructure;
+using eShop.Ordering.Infrastructure.Idempotency;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Address = eShop.Ordering.Domain.AggregatesModel.OrderAggregate.Address;
+using DomainOrder = eShop.Ordering.Domain.AggregatesModel.OrderAggregate.Order;
 
 namespace eShop.Ordering.FunctionalTests;
 
 public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
 {
     private readonly WebApplicationFactory<Program> _webApplicationFactory;
+    private readonly OrderingApiFixture _fixture;
     private readonly HttpClient _httpClient;
+    private readonly TestBuyerOrders _testBuyerOrders;
 
     public OrderingApiTests(OrderingApiFixture fixture)
     {
         var handler = new ApiVersionHandler(new QueryStringApiVersionWriter(), new ApiVersion(1.0));
 
         _webApplicationFactory = fixture;
+        _fixture = fixture;
         _httpClient = _webApplicationFactory.CreateDefaultClient(handler);
+        _testBuyerOrders = new TestBuyerOrders(fixture);
     }
 
     [Fact]
@@ -135,28 +149,304 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
     [Fact]
     public async Task AddNewOrder()
     {
-        // Act
-        var item = new BasketItem
+        try
         {
-            Id = "1",
-            ProductId = 12,
-            ProductName = "Test",
-            UnitPrice = 10,
-            OldUnitPrice = 9,
-            Quantity = 1,
-            PictureUrl = null
-        };
-        var cardExpirationDate = Convert.ToDateTime("2023-12-22T12:34:24.334Z");
-        var OrderRequest = new CreateOrderRequest("1", "TestUser", null, null, null, null, null, "XXXXXXXXXXXX0005", "Test User", cardExpirationDate, "test buyer", 1, null, new List<BasketItem> { item });
-        var content = new StringContent(JsonSerializer.Serialize(OrderRequest), UTF8Encoding.UTF8, "application/json")
-        {
-            Headers = { { "x-requestid", Guid.NewGuid().ToString() } }
-        };
-        var response = await _httpClient.PostAsync("api/orders", content, TestContext.Current.CancellationToken);
-        var s = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            // Act
+            var item = new BasketItem
+            {
+                Id = "1",
+                ProductId = 1,
+                ProductName = "Test",
+                UnitPrice = 10,
+                OldUnitPrice = 9,
+                Quantity = 1,
+                PictureUrl = null
+            };
+            var cardExpirationDate = DateTime.UtcNow.AddYears(1);
+            var OrderRequest = new CreateOrderRequest(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345", "XXXXXXXXXXXX0005", "Test User", cardExpirationDate, "123", 1, null, new List<BasketItem> { item });
+            var content = new StringContent(JsonSerializer.Serialize(OrderRequest), UTF8Encoding.UTF8, "application/json")
+            {
+                Headers = { { "x-requestid", Guid.NewGuid().ToString() } }
+            };
+            var response = await _httpClient.PostAsync("api/orders", content, TestContext.Current.CancellationToken);
+            var s = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV2WithMatchingExpectedTotalCreatesOrderAtServerPrices()
+    {
+        try
+        {
+            var response = await _testBuyerOrders.PostV2Async(Guid.NewGuid(), [new QuoteLine(1, 2), new QuoteLine(3, 1)], expectedTotal: 25.25m);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(25.25m, order.Total);
+            Assert.Equal(25.25m, order.Subtotal);
+            Assert.Equal(0m, order.ShippingFee);
+            Assert.Collection(order.OrderItems.OrderBy(i => i.UnitPrice),
+                i => { Assert.Equal(5.25, i.UnitPrice); Assert.Equal(1, i.Units); Assert.Equal("Fake Product 3", i.ProductName); },
+                i => { Assert.Equal(10.00, i.UnitPrice); Assert.Equal(2, i.Units); Assert.Equal("Fake Product 1", i.ProductName); });
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV2PlacesOrderForTokenUserNotBodyUserId()
+    {
+        const string otherBuyer = "6f1c0a2e-0000-4000-8000-0000000000ff";
+        try
+        {
+            var response = await _testBuyerOrders.PostV2Async(Guid.NewGuid(), [new QuoteLine(1, 1)], expectedTotal: 10.00m, userId: otherBuyer);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(10.00m, order.Total);
+
+            using var scope = _webApplicationFactory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+            Assert.False(await context.Buyers.AnyAsync(b => b.IdentityGuid == otherBuyer, TestContext.Current.CancellationToken));
+            var orderedFor = await context.Orders
+                .Where(o => o.Id == order.OrderNumber)
+                .Join(context.Buyers, o => o.BuyerId, b => (int?)b.Id, (o, b) => b.IdentityGuid)
+                .SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(AutoAuthorizeMiddleware.IDENTITY_ID, orderedFor);
+            Assert.DoesNotContain(await context.Set<IntegrationEventLogEntry>().Select(e => e.Content).ToListAsync(TestContext.Current.CancellationToken),
+                content => content.Contains(otherBuyer));
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV2WithStaleExpectedTotalReturnsConflictWithFreshQuote()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+
+            var response = await _testBuyerOrders.PostV2Async(requestId, [new QuoteLine(1, 2), new QuoteLine(3, 1)], expectedTotal: 20.00m);
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+            using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.Equal("https://eshop/problems/prices-changed", problem.RootElement.GetProperty("type").GetString());
+            var quote = problem.RootElement.GetProperty("quote");
+            Assert.Equal(25.25m, quote.GetProperty("total").GetDecimal());
+            Assert.Equal(2, quote.GetProperty("lines").GetArrayLength());
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
+            Assert.False(await ClientRequestExistsAsync(requestId));
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV2WithUnknownProductReturnsBadRequest()
+    {
+        try
+        {
+            var response = await _testBuyerOrders.PostV2Async(Guid.NewGuid(), [new QuoteLine(1, 1), new QuoteLine(777, 1)], expectedTotal: 10.00m);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+            var problem = await response.Content.ReadFromJsonAsync<HttpValidationProblemDetails>(TestContext.Current.CancellationToken);
+            var message = Assert.Single(Assert.Contains("items", problem.Errors));
+            Assert.Contains("777", message);
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RetryAfterPriceConflictWithSameRequestIdCreatesOrder()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+            List<QuoteLine> items = [new QuoteLine(2, 1)];
+
+            var conflict = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 19.99m);
+            Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+
+            var retry = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
+
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(20.50m, order.Total);
+            Assert.True(await ClientRequestExistsAsync(requestId));
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RetryAfterFailedCreateWithSameRequestIdCreatesOrder()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+            List<QuoteLine> items = [new QuoteLine(2, 1)];
+            var orderStartedEvents = await OrderStartedEventCountAsync();
+
+            var failed = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m, cardExpiration: DateTime.UtcNow.AddYears(-1));
+            Assert.Equal(HttpStatusCode.BadRequest, failed.StatusCode);
+            Assert.Equal("application/problem+json", failed.Content.Headers.ContentType?.MediaType);
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
+            Assert.False(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents, await OrderStartedEventCountAsync());
+
+            var retry = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
+
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(20.50m, order.Total);
+            Assert.True(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents + 1, await OrderStartedEventCountAsync());
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    // A catalog price of 0.00 breaks the order's minimum unit price while the order is built. Before the fix the
+    // basket-clearing OrderStarted event was already saved and committed (and v1 answered 200 with no order).
+    [Fact]
+    public async Task CreateOrderV2ThatFailsWhileBuildingTheOrderSavesNothingAndRetryCreatesOneOrder()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+            List<QuoteLine> items = [new QuoteLine(2, 1)];
+            var orderStartedEvents = await OrderStartedEventCountAsync();
+
+            _fixture.CatalogPriceSource.OverridePrice(2, 0.00m);
+            var failed = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 0.00m);
+            _fixture.CatalogPriceSource.ResetPrices();
+
+            Assert.Equal(HttpStatusCode.BadRequest, failed.StatusCode);
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
+            Assert.False(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents, await OrderStartedEventCountAsync());
+
+            var retry = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
+            var duplicate = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
+
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, duplicate.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(20.50m, order.Total);
+            Assert.Equal(orderStartedEvents + 1, await OrderStartedEventCountAsync());
+        }
+        finally
+        {
+            _fixture.CatalogPriceSource.ResetPrices();
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV1ThatFailsWhileBuildingTheOrderSavesNothingAndRetryCreatesOneOrder()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+            var item = new BasketItem { Id = "1", ProductId = 2, ProductName = "x", UnitPrice = 20.50m, Quantity = 1 };
+            var orderStartedEvents = await OrderStartedEventCountAsync();
+
+            _fixture.CatalogPriceSource.OverridePrice(2, 0.00m);
+            var failed = await PostOrderV1Async(requestId, item);
+            _fixture.CatalogPriceSource.ResetPrices();
+
+            Assert.Equal(HttpStatusCode.BadRequest, failed.StatusCode);
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
+            Assert.False(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents, await OrderStartedEventCountAsync());
+
+            var retry = await PostOrderV1Async(requestId, item);
+
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(20.50m, order.Total);
+            Assert.True(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents + 1, await OrderStartedEventCountAsync());
+        }
+        finally
+        {
+            _fixture.CatalogPriceSource.ResetPrices();
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV1IgnoresClientUnitPrice()
+    {
+        try
+        {
+            var item = new BasketItem { Id = "1", ProductId = 2, ProductName = "Tampered", UnitPrice = 0.01m, OldUnitPrice = 0.01m, Quantity = 2 };
+
+            var response = await PostOrderV1Async(Guid.NewGuid(), item);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(41.00m, order.Total);
+            var line = Assert.Single(order.OrderItems);
+            Assert.Equal(20.50, line.UnitPrice);
+            Assert.Equal("Fake Product 2", line.ProductName);
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV1RecordsUsage()
+    {
+        try
+        {
+            using (var scope = _webApplicationFactory.Services.CreateScope())
+            {
+                var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+                await context.Database.ExecuteSqlRawAsync("DELETE FROM ordering.apiusagedaily", TestContext.Current.CancellationToken);
+            }
+
+            var response = await PostOrderV1Async(Guid.NewGuid(), new BasketItem { Id = "1", ProductId = 5, ProductName = "x", UnitPrice = 0.99m, Quantity = 1 });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, "api/usage/create-order-v1?days=7");
+            request.Headers.Add(AutoAuthorizeMiddleware.TestScopesHeader, "ordering.usage");
+            var usage = await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.OK, usage.StatusCode);
+            using var body = JsonDocument.Parse(await usage.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(1, body.RootElement.GetProperty("calls").GetInt64());
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
     }
 
     [Fact]
@@ -183,6 +473,56 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetOrderReturnsPricingBreakdown()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        int orderId;
+        int buyerId;
+
+        // Seeded through the context so the order carries a discount and shipping fee that no published rule produces yet.
+        using (var scope = _webApplicationFactory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+            var buyer = context.Buyers.Add(new Buyer(AutoAuthorizeMiddleware.IDENTITY_ID, "Pricing Buyer")).Entity;
+            var order = new DomainOrder("userId", "Pricing Buyer", new Address("street", "city", "state", "country", "zipcode"),
+                cardTypeId: 1, cardNumber: "XXXXXXXXXXXX0005", cardSecurityNumber: "123", cardHolderName: "name",
+                cardExpiration: DateTime.UtcNow.AddYears(1), buyerId: buyer.Id);
+            order.AddOrderItem(1, "cup", 10m, 3m, string.Empty, units: 2);
+            order.AddOrderItem(2, "mug", 5m, 0m, string.Empty);
+            order.ApplyPricing(shippingFee: 4.99m, pricingSnapshotVersion: 7);
+            context.Orders.Add(order);
+            await context.SaveChangesAsync(cancellationToken);
+            orderId = order.Id;
+            buyerId = buyer.Id;
+        }
+
+        try
+        {
+            var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+            var order = await _httpClient.GetFromJsonAsync<Order>($"api/orders/{orderId}", jsonOptions, cancellationToken);
+
+            Assert.Equal(25m, order.Subtotal);
+            Assert.Equal(3m, order.DiscountTotal);
+            Assert.Equal(4.99m, order.ShippingFee);
+            Assert.Equal(26.99m, order.Total);
+            Assert.Equal(3m, order.OrderItems.Sum(i => i.Discount));
+
+            var summaries = await _httpClient.GetFromJsonAsync<List<OrderSummary>>("api/orders", jsonOptions, cancellationToken);
+            var summary = Assert.Single(summaries, s => s.OrderNumber == orderId);
+            Assert.Equal(26.99, summary.Total);
+        }
+        finally
+        {
+            // Remove the seeded order so tests that expect an empty orders table stay independent of run order.
+            using var scope = _webApplicationFactory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+            await context.Orders.Where(o => o.Id == orderId).ExecuteDeleteAsync(cancellationToken);
+            await context.Buyers.Where(b => b.Id == buyerId).ExecuteDeleteAsync(cancellationToken);
+        }
     }
 
     [Fact]
@@ -239,5 +579,30 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
             OrderNumber = "-1"
         };
         return JsonSerializer.Serialize(order);
+    }
+
+    private async Task<HttpResponseMessage> PostOrderV1Async(Guid requestId, params BasketItem[] items)
+    {
+        var body = new CreateOrderRequest(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345",
+            "4012888888881881", "Test User", DateTime.UtcNow.AddYears(1), "123", 1, "test buyer", items.ToList());
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/orders") { Content = JsonContent.Create(body) };
+        request.Headers.Add("x-requestid", requestId.ToString());
+        return await _httpClient.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    private async Task<bool> ClientRequestExistsAsync(Guid requestId)
+    {
+        using var scope = _webApplicationFactory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+        return await context.Set<ClientRequest>().AnyAsync(r => r.Id == requestId, TestContext.Current.CancellationToken);
+    }
+
+    // OrderStartedIntegrationEvent clears the buyer's basket once published, so it must only be saved with an order.
+    private async Task<int> OrderStartedEventCountAsync()
+    {
+        using var scope = _webApplicationFactory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+        return await context.Set<IntegrationEventLogEntry>()
+            .CountAsync(e => e.EventTypeName == typeof(OrderStartedIntegrationEvent).FullName, TestContext.Current.CancellationToken);
     }
 }

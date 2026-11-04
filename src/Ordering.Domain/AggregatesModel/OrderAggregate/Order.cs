@@ -34,6 +34,16 @@ public class Order
 
     public int? PaymentId { get; private set; }
 
+    public decimal Subtotal { get; private set; }
+
+    public decimal DiscountTotal { get; private set; }
+
+    public decimal ShippingFee { get; private set; }
+
+    public decimal Total { get; private set; }
+
+    public long PricingSnapshotVersion { get; private set; }
+
     public static Order NewDraft()
     {
         var order = new Order
@@ -68,7 +78,7 @@ public class Order
     // This Order AggregateRoot's method "AddOrderItem()" should be the only way to add Items to the Order,
     // so any behavior (discounts, etc.) and validations are controlled by the AggregateRoot 
     // in order to maintain consistency between the whole Aggregate. 
-    public void AddOrderItem(int productId, string productName, decimal unitPrice, decimal discount, string pictureUrl, int units = 1)
+    public void AddOrderItem(int productId, string productName, decimal unitPrice, decimal discount, string pictureUrl, int units = 1, decimal? basePrice = null)
     {
         var existingOrderForProduct = _orderItems.SingleOrDefault(o => o.ProductId == productId);
 
@@ -85,9 +95,38 @@ public class Order
         else
         {
             //add validated new order item
-            var orderItem = new OrderItem(productId, productName, unitPrice, discount, pictureUrl, units);
+            var orderItem = new OrderItem(productId, productName, unitPrice, discount, pictureUrl, units, basePrice);
             _orderItems.Add(orderItem);
         }
+
+        // Keeps the stored breakdown in step with the lines for orders that are never explicitly priced.
+        RecalculateTotals();
+    }
+
+    public void ApplyPricing(decimal shippingFee, long pricingSnapshotVersion)
+    {
+        if (shippingFee < 0)
+        {
+            throw new OrderingDomainException("The shipping fee cannot be negative");
+        }
+
+        var total = _orderItems.Sum(o => o.Units * o.UnitPrice - o.Discount) + shippingFee;
+
+        if (total < 0)
+        {
+            throw new OrderingDomainException("The order total cannot be negative");
+        }
+
+        ShippingFee = shippingFee;
+        PricingSnapshotVersion = pricingSnapshotVersion;
+        RecalculateTotals();
+    }
+
+    private void RecalculateTotals()
+    {
+        Subtotal = _orderItems.Sum(o => o.Units * o.UnitPrice);
+        DiscountTotal = _orderItems.Sum(o => o.Discount);
+        Total = Subtotal - DiscountTotal + ShippingFee;
     }
 
     public void SetPaymentMethodVerified(int buyerId, int paymentId)
@@ -182,5 +221,5 @@ public class Order
         throw new OrderingDomainException($"Is not possible to change the order status from {OrderStatus} to {orderStatusToChange}.");
     }
 
-    public decimal GetTotal() => _orderItems.Sum(o => o.Units * o.UnitPrice);
+    public decimal GetTotal() => _orderItems.Sum(o => o.Units * o.UnitPrice - o.Discount) + ShippingFee;
 }

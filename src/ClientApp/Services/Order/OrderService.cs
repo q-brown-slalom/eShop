@@ -1,7 +1,9 @@
 using System.Net;
+using System.Text.Json;
 using eShop.ClientApp.Helpers;
 using eShop.ClientApp.Models.Basket;
 using eShop.ClientApp.Models.Orders;
+using eShop.ClientApp.Models.Pricing;
 using eShop.ClientApp.Services.Identity;
 using eShop.ClientApp.Services.RequestProvider;
 using eShop.ClientApp.Services.Settings;
@@ -11,7 +13,9 @@ namespace eShop.ClientApp.Services.Order;
 public class OrderService : IOrderService
 {
     private const string ApiUrlBase = "api/orders";
-    private const string ApiVersion = "api-version=1.0";
+    private const string ApiVersion = "api-version=2.0";
+    private const string PricingQuoteUrl = "api/pricing/quote";
+    private const string PricingApiVersion = "api-version=1.0";
     
     private readonly IIdentityService _identityService;
     private readonly IRequestProvider _requestProvider;
@@ -25,18 +29,56 @@ public class OrderService : IOrderService
         _requestProvider = requestProvider;
     }
 
-    public async Task CreateOrderAsync(Models.Orders.Order newOrder)
+    public async Task<PriceQuote> GetQuoteAsync(IEnumerable<QuoteLine> lines)
+    {
+        var authToken = await _identityService.GetAuthTokenAsync().ConfigureAwait(false);
+
+        var uri = $"{UriHelper.CombineUri(_settingsService.GatewayOrdersEndpointBase, PricingQuoteUrl)}?{PricingApiVersion}";
+
+        return await _requestProvider
+            .PostAsync<PriceQuoteRequest, PriceQuote>(uri, new PriceQuoteRequest(lines.ToList()), authToken ?? string.Empty)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<CreateOrderResult> CreateOrderAsync(Models.Orders.Order newOrder, decimal expectedTotal)
     {
         var authToken = await _identityService.GetAuthTokenAsync().ConfigureAwait(false);
 
         if (string.IsNullOrEmpty(authToken))
         {
-            return;
+            throw new InvalidOperationException("A signed-in user is required to create an order.");
         }
 
         var uri = $"{UriHelper.CombineUri(_settingsService.GatewayOrdersEndpointBase, ApiUrlBase)}?{ApiVersion}";
 
-        var success = await _requestProvider.PostAsync(uri, newOrder, authToken, "x-requestid").ConfigureAwait(false);
+        var request = new CreateOrderV2Request(
+            newOrder.UserId,
+            newOrder.UserName,
+            newOrder.ShippingCity,
+            newOrder.ShippingStreet,
+            newOrder.ShippingState,
+            newOrder.ShippingCountry,
+            newOrder.ShippingZipCode,
+            newOrder.CardNumber,
+            newOrder.CardHolderName,
+            newOrder.CardExpiration,
+            newOrder.CardSecurityNumber,
+            newOrder.CardTypeId,
+            newOrder.UserId,
+            newOrder.OrderItems.Select(i => new QuoteLine((int)i.ProductId, i.Quantity)).ToList(),
+            expectedTotal);
+
+        try
+        {
+            await _requestProvider.PostAsync(uri, request, authToken, "x-requestid").ConfigureAwait(false);
+        }
+        catch (HttpRequestExceptionEx ex) when (ex.HttpCode == HttpStatusCode.Conflict
+                                                && TryReadPricesChanged(ex.Message, out var quote))
+        {
+            return new CreateOrderResult.PricesChanged(quote);
+        }
+
+        return new CreateOrderResult.Created();
     }
 
     public async Task<IEnumerable<Models.Orders.Order>> GetOrdersAsync()
@@ -124,5 +166,27 @@ public class OrderService : IOrderService
             ZipCode = order.ShippingZipCode,
             Street = order.ShippingStreet
         };
+    }
+
+    private static bool TryReadPricesChanged(string problemJson, out PriceQuote quote)
+    {
+        quote = null;
+
+        if (string.IsNullOrEmpty(problemJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            var problem = JsonSerializer.Deserialize(problemJson, EShopJsonSerializerContext.Default.PricesChangedProblem);
+            quote = problem?.Type == PricesChangedProblem.ProblemType ? problem.Quote : null;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return quote is not null;
     }
 }

@@ -2,9 +2,11 @@ using CommunityToolkit.Mvvm.Messaging;
 using eShop.ClientApp.Messages;
 using eShop.ClientApp.Models.Basket;
 using eShop.ClientApp.Models.Orders;
+using eShop.ClientApp.Models.Pricing;
 using eShop.ClientApp.Models.User;
 using eShop.ClientApp.Services;
 using eShop.ClientApp.Services.AppEnvironment;
+using eShop.ClientApp.Services.Order;
 using eShop.ClientApp.Services.Settings;
 using eShop.ClientApp.ViewModels.Base;
 
@@ -12,6 +14,11 @@ namespace eShop.ClientApp.ViewModels;
 
 public partial class CheckoutViewModel : ViewModelBase
 {
+    public const string PricesChangedMessage =
+        "Prices have changed since you reviewed your order. Check the new total and place your order again.";
+
+    private const string QuoteUnavailableMessage = "We couldn't price your order. Please, try again.";
+
     private readonly IAppEnvironmentService _appEnvironmentService;
 
     private readonly BasketViewModel _basketViewModel;
@@ -20,7 +27,14 @@ public partial class CheckoutViewModel : ViewModelBase
 
     [ObservableProperty] private Order _order;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Total))]
+    [NotifyCanExecuteChangedFor(nameof(CheckoutCommand))]
+    private PriceQuote _quote;
+
     [ObservableProperty] private Address _shippingAddress;
+
+    public decimal Total => Quote?.Total ?? 0m;
 
     public CheckoutViewModel(
         BasketViewModel basketViewModel,
@@ -85,8 +99,7 @@ public partial class CheckoutViewModel : ViewModelBase
                     ShippingCountry = ShippingAddress.Country,
                     ShippingStreet = ShippingAddress.Street,
                     ShippingCity = ShippingAddress.City,
-                    ShippingZipCode = ShippingAddress.ZipCode,
-                    Total = CalculateTotal(orderItems)
+                    ShippingZipCode = ShippingAddress.ZipCode
                 };
 
                 if (_settingsService.UseMocks)
@@ -98,10 +111,21 @@ public partial class CheckoutViewModel : ViewModelBase
                     Order.OrderNumber = orders.Count() + 1;
                     OnPropertyChanged(nameof(Order));
                 }
+
+                try
+                {
+                    var quoteLines = orderItems.Select(i => new QuoteLine((int)i.ProductId, i.Quantity)).ToList();
+                    ApplyQuote(await _appEnvironmentService.OrderService.GetQuoteAsync(quoteLines));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex);
+                    await _dialogService.ShowAlertAsync(QuoteUnavailableMessage, "Oops!", "Ok");
+                }
             });
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanCheckout))]
     private async Task CheckoutAsync()
     {
         try
@@ -109,7 +133,14 @@ public partial class CheckoutViewModel : ViewModelBase
             var basket = _appEnvironmentService.OrderService.MapOrderToBasket(Order);
             basket.RequestId = Guid.NewGuid();
 
-            await _appEnvironmentService.OrderService.CreateOrderAsync(Order);
+            var result = await _appEnvironmentService.OrderService.CreateOrderAsync(Order, Quote.Total);
+
+            if (result is CreateOrderResult.PricesChanged pricesChanged)
+            {
+                ApplyQuote(pricesChanged.Quote);
+                await _dialogService.ShowAlertAsync(PricesChangedMessage, "Checkout", "Ok");
+                return;
+            }
 
             // Clean Basket
             await _appEnvironmentService.BasketService.ClearBasketAsync();
@@ -133,6 +164,26 @@ public partial class CheckoutViewModel : ViewModelBase
         }
     }
 
+    private bool CanCheckout() => Quote is not null;
+
+    private void ApplyQuote(PriceQuote quote)
+    {
+        foreach (var line in quote.Lines)
+        {
+            var orderItem = Order.OrderItems.FirstOrDefault(i => i.ProductId == line.ProductId);
+
+            if (orderItem is not null)
+            {
+                orderItem.UnitPrice = line.UnitPrice;
+                orderItem.Discount = line.Discount;
+            }
+        }
+
+        Order.Total = quote.Total;
+        Quote = quote;
+        OnPropertyChanged(nameof(Order));
+    }
+
     private static List<OrderItem> CreateOrderItems(IEnumerable<BasketItem> basketItems)
     {
         var orderItems = new List<OrderItem>();
@@ -154,17 +205,5 @@ public partial class CheckoutViewModel : ViewModelBase
         }
 
         return orderItems;
-    }
-
-    private static decimal CalculateTotal(List<OrderItem> orderItems)
-    {
-        decimal total = 0;
-
-        foreach (var orderItem in orderItems)
-        {
-            total += orderItem.Quantity * orderItem.UnitPrice;
-        }
-
-        return total;
     }
 }

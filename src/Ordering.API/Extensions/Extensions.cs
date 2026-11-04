@@ -1,4 +1,8 @@
-﻿using FluentValidation;
+﻿using eShop.BusinessRules.Client;
+using eShop.BusinessRules.Client.IntegrationEvents;
+using eShop.Ordering.API.Application.Pricing;
+using FluentValidation;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 internal static class Extensions
 {
@@ -8,6 +12,7 @@ internal static class Extensions
         
         // Add the authentication services to DI
         builder.AddDefaultAuthentication();
+        services.AddAuthorizationBuilder().AddOrderingPolicies();
 
         // Pooling is disabled because of the following error:
         // Unhandled exception. System.InvalidOperationException:
@@ -48,6 +53,15 @@ internal static class Extensions
         services.AddScoped<IBuyerRepository, BuyerRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IRequestManager, RequestManager>();
+
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IApiUsageRecorder, ApiUsageRecorder>();
+        services.AddSingleton<OrderingMetrics>();
+
+        // Pricing reads only the local rules snapshot; BusinessRules.API is never on the request path.
+        builder.AddBusinessRulesClient();
+        services.AddHttpClient<ICatalogPriceSource, CatalogPriceClient>(client => client.BaseAddress = new Uri(CatalogPriceClient.BaseAddress));
+        services.AddScoped<IOrderPricingService, OrderPricingService>();
     }
 
     private static void AddEventBusSubscriptions(this IEventBusBuilder eventBus)
@@ -57,5 +71,6 @@ internal static class Extensions
         eventBus.AddSubscription<OrderStockRejectedIntegrationEvent, OrderStockRejectedIntegrationEventHandler>();
         eventBus.AddSubscription<OrderPaymentFailedIntegrationEvent, OrderPaymentFailedIntegrationEventHandler>();
         eventBus.AddSubscription<OrderPaymentSucceededIntegrationEvent, OrderPaymentSucceededIntegrationEventHandler>();
+        eventBus.AddSubscription<BusinessRulesSnapshotPublishedIntegrationEvent, BusinessRulesSnapshotPublishedIntegrationEventHandler>();
     }
 }
