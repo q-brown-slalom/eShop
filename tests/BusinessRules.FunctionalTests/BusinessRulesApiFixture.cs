@@ -1,8 +1,10 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using eShop.BusinessRules.API.Services;
 using eShop.BusinessRules.UnitTests;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 namespace eShop.BusinessRules.FunctionalTests;
@@ -13,6 +15,8 @@ public sealed class BusinessRulesApiFixture : WebApplicationFactory<Program>
     private string? _postgresConnectionString;
 
     public IResourceBuilder<PostgresServerResource> Postgres { get; }
+
+    public FakeOrderingUsageClient OrderingUsage { get; } = new();
 
     public BusinessRulesApiFixture()
     {
@@ -40,6 +44,9 @@ public sealed class BusinessRulesApiFixture : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             services.AddRuleType<TestRuleType>();
+            services.AddRuleType<TestPriceRuleType>();
+            services.RemoveAll<IOrderingUsageClient>();
+            services.AddSingleton<IOrderingUsageClient>(OrderingUsage);
             services.AddAuthentication(TestAuthHandler.SchemeName)
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
         });

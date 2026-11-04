@@ -50,7 +50,7 @@ public sealed class RulePublishingService(
         var guardResult = await guard.CheckAsync(type, guardOverrideReason, cancellationToken);
         if (!guardResult.Allowed)
         {
-            return new(PublishOutcomeKind.GuardRejected, ProblemType: guardResult.ProblemType);
+            return new(PublishOutcomeKind.GuardRejected, ProblemType: guardResult.ProblemType, Detail: guardResult.Detail);
         }
 
         var now = timeProvider.GetUtcNow();
@@ -79,6 +79,13 @@ public sealed class RulePublishingService(
         }
 
         context.RulesSnapshots.Add(RulesSnapshotRecord.Create(snapshot.Version, snapshot.PublishedAt, snapshot.Rules));
+        if (guardResult.Overridden)
+        {
+            context.AuditEntries.Add(new AuditEntry(
+                now, actor, AuditAction.GuardOverridden, version.RuleTypeId, version.Scope, version.Id,
+                beforeJson: null, afterJson: null, reason: guardOverrideReason?.Trim()));
+        }
+
         context.AuditEntries.Add(new AuditEntry(
             now, actor, AuditAction.Published, version.RuleTypeId, version.Scope, version.Id,
             beforeJson: before, afterJson: RulesAdminApi.ToAuditJson(version)));

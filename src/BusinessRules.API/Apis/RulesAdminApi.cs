@@ -49,7 +49,7 @@ public static class RulesAdminApi
             .RequireAuthorization(RulesPolicies.Publisher)
             .WithName("PublishRuleVersion")
             .WithSummary("Publish a rule draft")
-            .WithDescription("Publish a draft into a new rules snapshot version and notify consumers. Non-drafts and concurrent publishes return 409; the publish guard may refuse the publish.")
+            .WithDescription("Publish a draft into a new rules snapshot version and notify consumers. Non-drafts and concurrent publishes return 409. Price-affecting rules return 409 (`v1-clients-active`) while create-order v1 was called in the last 7 days, unless `guardOverrideReason` (1-500 characters) is given, which is audited; they return 503 if that usage cannot be read.")
             .WithTags("Rules");
 
         api.MapGet("/audit", GetAudit)
@@ -204,13 +204,26 @@ public static class RulesAdminApi
             PublishOutcomeKind.GuardRejected when outcome.ProblemType == PublishProblemTypes.GuardUnavailable => TypedResults.Problem(
                 type: outcome.ProblemType,
                 title: "Publish guard unavailable",
-                detail: "The publish guard could not check this publish, so it was refused.",
+                detail: outcome.Detail ?? "The publish guard could not check this publish, so it was refused.",
                 statusCode: StatusCodes.Status503ServiceUnavailable),
+            PublishOutcomeKind.GuardRejected when outcome.ProblemType == PublishProblemTypes.InvalidOverrideReason => TypedResults.Problem(
+                type: outcome.ProblemType,
+                title: "Invalid guard override reason",
+                detail: outcome.Detail,
+                statusCode: StatusCodes.Status400BadRequest),
+            PublishOutcomeKind.GuardRejected when outcome.ProblemType == PublishProblemTypes.V1ClientsActive => TypedResults.Conflict(new ProblemDetails
+            {
+                Type = outcome.ProblemType,
+                Status = StatusCodes.Status409Conflict,
+                Title = "v1 create-order clients are still active",
+                Detail = outcome.Detail,
+            }),
             PublishOutcomeKind.GuardRejected => TypedResults.Conflict(new ProblemDetails
             {
                 Type = outcome.ProblemType,
                 Status = StatusCodes.Status409Conflict,
                 Title = "Publish refused by the publish guard",
+                Detail = outcome.Detail,
             }),
             _ => TypedResults.Conflict(new ProblemDetails
             {

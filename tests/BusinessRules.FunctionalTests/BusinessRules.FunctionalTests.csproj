@@ -25,6 +25,7 @@
   <ItemGroup>
     <!-- Shared with the unit tests so both exercise the same rule type. -->
     <Compile Include="..\BusinessRules.UnitTests\TestRuleType.cs" Link="TestRuleType.cs" />
+    <Compile Include="..\BusinessRules.UnitTests\TestPriceRuleType.cs" Link="TestPriceRuleType.cs" />
   </ItemGroup>
 
 </Project>

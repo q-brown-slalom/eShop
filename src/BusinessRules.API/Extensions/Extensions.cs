@@ -1,8 +1,11 @@
 using System.Text.Json.Serialization;
+using eShop.BusinessRules.Client;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 internal static class Extensions
 {
+    private const string OrderingUsageScope = "ordering.usage";
+
     public static void AddApplicationServices(this IHostApplicationBuilder builder)
     {
         var services = builder.Services;
@@ -20,8 +23,10 @@ internal static class Extensions
         services.AddTransient<IRulesIntegrationEventService, RulesIntegrationEventService>();
         services.AddScoped<RulePublishingService>();
         services.AddSingleton<BusinessRulesMetrics>();
-        // Replaced by the v1-clients publish guard once Ordering usage can be checked.
-        services.AddSingleton<IPublishGuard, AllowAllPublishGuard>();
+        services.AddScoped<IPublishGuard, V1ClientsPublishGuard>();
+        services.AddHttpClient<IOrderingUsageClient, OrderingUsageClient>(client => client.BaseAddress = new Uri("https+http://ordering-api"))
+            .AddApiVersion(1.0)
+            .AddServiceToken(OrderingUsageScope);
 
         // Rule types are registered in code with AddRuleType<T>(); phase 1 registers none (D1).
         services.TryAddSingleton<RuleTypeRegistry>();

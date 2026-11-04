@@ -12,6 +12,9 @@ public interface IPublishGuard
 public record GuardResult(bool Allowed, bool Overridden, string? ProblemType)
 {
     public static GuardResult Allow { get; } = new(true, false, null);
+
+    /// <summary>The ProblemDetails detail explaining a refusal.</summary>
+    public string? Detail { get; init; }
 }
 
 public static class PublishProblemTypes
@@ -19,4 +22,5 @@ public static class PublishProblemTypes
     public const string ConcurrentPublish = "https://eshop/problems/concurrent-publish";
     public const string V1ClientsActive = "https://eshop/problems/v1-clients-active";
     public const string GuardUnavailable = "https://eshop/problems/publish-guard-unavailable";
+    public const string InvalidOverrideReason = "https://eshop/problems/invalid-guard-override-reason";
 }
