@@ -12,10 +12,14 @@ public static class BusinessRuleTypesExtensions
     /// </summary>
     public static IServiceCollection AddBusinessRuleTypes(this IServiceCollection services)
     {
+        services.AddRuleType<PriceAdjustmentRuleType>();
+        services.AddRuleType<PromotionRuleType>();
         services.AddRuleType<GracePeriodRuleType>();
         services.AddRuleType<StockShortfallPolicyRuleType>();
         services.AddRuleType<ShippingFeeRuleType>();
 
+        services.TryAddSingleton<PriceAdjustmentRuleType>();
+        services.TryAddSingleton<PromotionRuleType>();
         services.TryAddSingleton<GracePeriodRuleType>();
         services.TryAddSingleton<StockShortfallPolicyRuleType>();
         services.TryAddSingleton<ShippingFeeRuleType>();

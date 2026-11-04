@@ -73,6 +73,6 @@ public sealed class GlobalRuleTypesTests
     {
         var registry = new ServiceCollection().AddBusinessRuleTypes().AddBusinessRuleTypes().BuildServiceProvider().GetRequiredService<RuleTypeRegistry>();
 
-        Assert.HasCount(3, registry.All);
+        Assert.HasCount(5, registry.All);
     }
 }
