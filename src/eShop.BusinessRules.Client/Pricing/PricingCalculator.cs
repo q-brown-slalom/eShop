@@ -1,3 +1,4 @@
+using eShop.BusinessRules.Client.Rules.Types;
 using eShop.BusinessRules.Client.Snapshot;
 
 namespace eShop.BusinessRules.Client.Pricing;
@@ -9,6 +10,10 @@ namespace eShop.BusinessRules.Client.Pricing;
 /// </summary>
 public sealed class PricingCalculator
 {
+    private const decimal MinUnitPrice = 0.01m;
+
+    private static readonly PriceAdjustmentRuleType PriceAdjustments = new();
+
     public PriceQuote Calculate(
         IReadOnlyList<QuoteLine> lines,
         IReadOnlyDictionary<int, CatalogPrice> catalog,
@@ -23,7 +28,7 @@ public sealed class PricingCalculator
         EnsureProductsKnown(merged, catalog);
 
         var priced = merged.Select(line => CreateBaseLine(line, catalog[line.ProductId])).ToList();
-        priced = ApplyPriceAdjustments(priced, snapshot, now);
+        priced = ApplyPriceAdjustments(priced, catalog, snapshot, now);
         priced = ApplyLinePromotions(priced, snapshot, now);
         priced = ApplyOrderPromotion(priced, snapshot, now);
 
@@ -85,18 +90,49 @@ public sealed class PricingCalculator
     }
 
     private static PricedLine CreateBaseLine(QuoteLine line, CatalogPrice price)
-        => new(
+    {
+        var basePrice = PriceRounding.Round(price.BasePrice);
+        return new(
             price.ProductId,
             price.ProductName,
             price.PictureUrl,
             line.Units,
-            price.BasePrice,
-            UnitPrice: price.BasePrice,
+            basePrice,
+            UnitPrice: basePrice,
             Discount: 0m,
             PromotionLabel: null);
+    }
 
-    // Phase 2 (PRC-001): adjust UnitPrice per line.
-    private static List<PricedLine> ApplyPriceAdjustments(List<PricedLine> lines, RulesSnapshot snapshot, DateTimeOffset now) => lines;
+    private static List<PricedLine> ApplyPriceAdjustments(
+        List<PricedLine> lines,
+        IReadOnlyDictionary<int, CatalogPrice> catalog,
+        RulesSnapshot snapshot,
+        DateTimeOffset now)
+    {
+        var entries = PriceAdjustments.Resolve(snapshot, now).Entries;
+        if (entries.Count == 0)
+        {
+            return lines;
+        }
+
+        return [.. lines.Select(line => line with { UnitPrice = AdjustedUnitPrice(line, catalog[line.ProductId], entries) })];
+    }
+
+    private static decimal AdjustedUnitPrice(PricedLine line, CatalogPrice product, IReadOnlyList<PriceAdjustmentEntry> entries)
+    {
+        var entry = entries
+            .Where(e => e.Target.Matches(product))
+            .MaxBy(e => e.Target.Specificity);
+        if (entry is null)
+        {
+            return line.BasePrice;
+        }
+
+        var adjusted = entry.Mode == PriceAdjustmentMode.PercentOff
+            ? line.BasePrice * (1m - entry.Value / 100m)
+            : entry.Value;
+        return Math.Max(MinUnitPrice, PriceRounding.Round(adjusted));
+    }
 
     // Phase 2 (PRM-001): set per-line Discount and PromotionLabel.
     private static List<PricedLine> ApplyLinePromotions(List<PricedLine> lines, RulesSnapshot snapshot, DateTimeOffset now) => lines;

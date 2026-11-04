@@ -1,7 +1,9 @@
 namespace eShop.Ordering.UnitTests.Application;
 
 using System.Diagnostics.Metrics;
+using System.Text.Json;
 using eShop.BusinessRules.Client.Pricing;
+using eShop.BusinessRules.Client.Rules;
 using eShop.BusinessRules.Client.Snapshot;
 using eShop.Ordering.API.Application.Pricing;
 using eShop.Ordering.API.Infrastructure;
@@ -74,6 +76,37 @@ public class OrderPricingServiceTests
         Assert.AreEqual(10.01m, line.UnitPrice);
         Assert.AreEqual(30.03m, quote.Subtotal);
         Assert.AreEqual(30.03m, quote.Total);
+    }
+
+    [TestMethod]
+    public async Task QuoteReturnsCalculatorRoundingUnchanged()
+    {
+        var product = new CatalogPrice(1, "Product 1", 10.00m, 1, 1, null);
+        GivenCatalog(product);
+        var snapshot = new RulesSnapshot(
+            3,
+            Now.AddMinutes(-1),
+            [new SnapshotRuleVersion(
+                "PRC-001",
+                RuleScopes.Default,
+                1,
+                Now.AddHours(-1),
+                null,
+                JsonDocument.Parse("""{"entries":[{"target":{"kind":"All"},"mode":"PercentOff","value":33}]}""").RootElement.Clone())]);
+        _snapshotSource.FetchAsync(Arg.Any<long?>(), Arg.Any<CancellationToken>())
+            .Returns(new SnapshotFetchResult(false, snapshot));
+        var cache = CreateCache();
+        Assert.IsTrue(await cache.RefreshAsync(CancellationToken.None));
+        var service = CreateService(cache);
+
+        var quote = await service.QuoteAsync([new QuoteLine(1, 3)], CancellationToken.None);
+
+        var expected = new PricingCalculator().Calculate([new QuoteLine(1, 3)], new Dictionary<int, CatalogPrice> { [1] = product }, snapshot, Now);
+        Assert.AreEqual(6.70m, quote.Lines.Single().UnitPrice);
+        Assert.AreEqual(expected.Lines.Single(), quote.Lines.Single());
+        Assert.AreEqual(expected.Subtotal, quote.Subtotal);
+        Assert.AreEqual(expected.Total, quote.Total);
+        Assert.AreEqual(3, quote.SnapshotVersion);
     }
 
     [TestMethod]
