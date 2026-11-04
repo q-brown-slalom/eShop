@@ -27,7 +27,7 @@ public static class OrdersApi
         api.MapPost("/", CreateOrderV2Async)
             .WithName("CreateOrderV2")
             .WithSummary("Create an order at server prices")
-            .WithDescription($"Prices the items server-side and creates the order only when the priced total equals `expectedTotal` (rounded to 2 decimals). Otherwise returns 409 ProblemDetails of type `{PricesChangedProblemType}` with the fresh quote in `quote` and records nothing, so the same `x-requestid` can be retried. Returns 400 listing unknown product ids, 400 ProblemDetails when the order breaks an ordering rule (such as an expired card), and 503 when the catalog is unavailable. A rejected or failed create saves nothing, so the same `x-requestid` can be retried.")
+            .WithDescription($"Prices the items server-side and creates the order, for the signed-in user (the token's `sub`; any `userId` in the body is ignored), only when the priced total equals `expectedTotal` (rounded to 2 decimals). Otherwise returns 409 ProblemDetails of type `{PricesChangedProblemType}` with the fresh quote in `quote` and records nothing, so the same `x-requestid` can be retried. Returns 400 listing unknown product ids, 400 ProblemDetails when the order breaks an ordering rule (such as an expired card), and 503 when the catalog is unavailable. A rejected or failed create saves nothing, so the same `x-requestid` can be retried.")
             .WithTags("Orders");
 
         return api;
@@ -213,6 +213,22 @@ public static class OrdersApi
             return TypedResults.BadRequest("RequestId is missing.");
         }
 
+        // The order is always placed for the authenticated caller (the token's sub), never for the body's UserId, so a
+        // caller can't create an order for, or clear the basket of, another buyer. A differing body UserId is ignored.
+        var userId = services.IdentityService.GetUserIdentity();
+        if (string.IsNullOrEmpty(userId))
+        {
+            return TypedResults.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "User required",
+                detail: "Creating an order requires a signed-in user.");
+        }
+
+        if (request?.UserId is not null && request.UserId != userId)
+        {
+            services.Logger.LogWarning("Create order request names a different user than the token; the order is placed for the token's user");
+        }
+
         var errors = PricingApi.ValidateItems(request?.Items);
         if (errors.Count > 0)
         {
@@ -252,7 +268,7 @@ public static class OrdersApi
                 extensions: new Dictionary<string, object> { ["quote"] = quote });
         }
 
-        var command = CreateCommand(quote, request.UserId, request.UserName, request.City, request.Street,
+        var command = CreateCommand(quote, userId, request.UserName, request.City, request.Street,
             request.State, request.Country, request.ZipCode, request.CardNumber, request.CardHolderName, request.CardExpiration,
             request.CardSecurityNumber, request.CardTypeId);
 

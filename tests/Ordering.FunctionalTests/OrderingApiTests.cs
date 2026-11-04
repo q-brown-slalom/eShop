@@ -203,6 +203,35 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
     }
 
     [Fact]
+    public async Task CreateOrderV2PlacesOrderForTokenUserNotBodyUserId()
+    {
+        const string otherBuyer = "6f1c0a2e-0000-4000-8000-0000000000ff";
+        try
+        {
+            var response = await _testBuyerOrders.PostV2Async(Guid.NewGuid(), [new QuoteLine(1, 1)], expectedTotal: 10.00m, userId: otherBuyer);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(10.00m, order.Total);
+
+            using var scope = _webApplicationFactory.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+            Assert.False(await context.Buyers.AnyAsync(b => b.IdentityGuid == otherBuyer, TestContext.Current.CancellationToken));
+            var orderedFor = await context.Orders
+                .Where(o => o.Id == order.OrderNumber)
+                .Join(context.Buyers, o => o.BuyerId, b => (int?)b.Id, (o, b) => b.IdentityGuid)
+                .SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(AutoAuthorizeMiddleware.IDENTITY_ID, orderedFor);
+            Assert.DoesNotContain(await context.Set<IntegrationEventLogEntry>().Select(e => e.Content).ToListAsync(TestContext.Current.CancellationToken),
+                content => content.Contains(otherBuyer));
+        }
+        finally
+        {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
     public async Task CreateOrderV2WithStaleExpectedTotalReturnsConflictWithFreshQuote()
     {
         try

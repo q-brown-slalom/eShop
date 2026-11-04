@@ -26,9 +26,10 @@ public sealed class TestBuyerOrders
         _httpClientV2 = fixture.CreateDefaultClient(new ApiVersionHandler(new QueryStringApiVersionWriter(), new ApiVersion(2.0)));
     }
 
-    public async Task<HttpResponseMessage> PostV2Async(Guid requestId, List<QuoteLine> items, decimal expectedTotal, DateTime? cardExpiration = null)
+    public async Task<HttpResponseMessage> PostV2Async(Guid requestId, List<QuoteLine> items, decimal expectedTotal, DateTime? cardExpiration = null,
+        string userId = AutoAuthorizeMiddleware.IDENTITY_ID)
     {
-        var body = new CreateOrderV2Request(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345",
+        var body = new CreateOrderV2Request(userId, "TestUser", "city", "street", "state", "country", "12345",
             "4012888888881881", "Test User", cardExpiration ?? DateTime.UtcNow.AddYears(1), "123", 1, "test buyer", items, expectedTotal);
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/orders") { Content = JsonContent.Create(body) };
         request.Headers.Add("x-requestid", requestId.ToString());
