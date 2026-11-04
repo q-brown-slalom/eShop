@@ -68,13 +68,20 @@ public abstract class RuleType<TParameters> : IRuleType where TParameters : clas
 
     private bool TryDeserialize(JsonElement parameters, [NotNullWhen(true)] out TParameters? parsed, [NotNullWhen(false)] out string? error)
     {
+        if (parameters.ValueKind == JsonValueKind.Undefined)
+        {
+            parsed = null;
+            error = $"Parameters don't match the {Id} schema: a JSON object is required.";
+            return false;
+        }
+
         try
         {
             parsed = parameters.Deserialize<TParameters>(JsonOptions);
             error = parsed is null ? $"Parameters don't match the {Id} schema: a JSON object is required." : null;
             return parsed is not null;
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             parsed = null;
             error = $"Parameters don't match the {Id} schema: {ex.Message}";

@@ -39,7 +39,7 @@ public sealed class PriceAdjustmentRuleType : RuleType<PriceAdjustmentParameters
                     "additionalProperties": false
                   },
                   "mode": { "enum": ["PercentOff", "FixedPrice"] },
-                  "value": { "type": "number", "multipleOf": 0.01 }
+                  "value": { "type": "number", "multipleOf": 0.01, "maximum": 1000000 }
                 },
                 "required": ["target", "mode", "value"],
                 "additionalProperties": false
@@ -95,9 +95,9 @@ public sealed class PriceAdjustmentRuleType : RuleType<PriceAdjustmentParameters
             }
             else
             {
-                if (entry.Value <= 0m)
+                if (entry.Value is <= 0m or > RuleLimits.MaxMoney)
                 {
-                    yield return $"{path}.value: fixed price must be greater than 0.";
+                    yield return $"{path}.value: fixed price must be between 0.01 and {RuleLimits.MaxMoney:0}.";
                 }
 
                 if (!HasAtMostTwoDecimals(entry.Value))

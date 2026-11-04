@@ -39,7 +39,7 @@ public sealed class PromotionRuleType : RuleType<PromotionParameters>
                     "additionalProperties": false
                   },
                   "kind": { "enum": ["PercentOff", "AmountOff"] },
-                  "value": { "type": "number", "exclusiveMinimum": 0 },
+                  "value": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
                   "minUnits": { "type": ["integer", "null"], "minimum": 1 },
                   "label": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^<>]*$" }
                 },
@@ -54,8 +54,8 @@ public sealed class PromotionRuleType : RuleType<PromotionParameters>
                 "type": "object",
                 "properties": {
                   "kind": { "enum": ["PercentOff", "AmountOff"] },
-                  "value": { "type": "number", "exclusiveMinimum": 0 },
-                  "minSubtotal": { "type": "number", "minimum": 0, "multipleOf": 0.01 },
+                  "value": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
+                  "minSubtotal": { "type": "number", "minimum": 0, "maximum": 1000000, "multipleOf": 0.01 },
                   "label": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^<>]*$" }
                 },
                 "required": ["kind", "value", "minSubtotal", "label"],
@@ -147,9 +147,9 @@ public sealed class PromotionRuleType : RuleType<PromotionParameters>
                 yield return error;
             }
 
-            if (promotion.MinSubtotal < 0m)
+            if (promotion.MinSubtotal is < 0m or > RuleLimits.MaxMoney)
             {
-                yield return $"{path}.minSubtotal: must be 0 or more.";
+                yield return $"{path}.minSubtotal: must be between 0 and {RuleLimits.MaxMoney:0}.";
             }
 
             if (!HasAtMostTwoDecimals(promotion.MinSubtotal))
@@ -170,9 +170,9 @@ public sealed class PromotionRuleType : RuleType<PromotionParameters>
         }
         else
         {
-            if (value <= 0m)
+            if (value is <= 0m or > RuleLimits.MaxMoney)
             {
-                yield return $"{path}.value: amount off must be greater than 0.";
+                yield return $"{path}.value: amount off must be between 0.01 and {RuleLimits.MaxMoney:0}.";
             }
 
             if (!HasAtMostTwoDecimals(value))
@@ -184,8 +184,8 @@ public sealed class PromotionRuleType : RuleType<PromotionParameters>
 
     private static IEnumerable<string> ValidateLabel(string? label, string path)
     {
-        var length = label?.Trim().Length ?? 0;
-        if (length is < 1 or > MaxLabelLength)
+        // Raw length: the calculator stores the label unmodified in a varchar(MaxLabelLength) column.
+        if (label is null || label.Length > MaxLabelLength || string.IsNullOrWhiteSpace(label))
         {
             yield return $"{path}.label: must be 1 to {MaxLabelLength} characters.";
         }

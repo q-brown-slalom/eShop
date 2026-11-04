@@ -68,6 +68,44 @@ public sealed class TargetedRuleTypesTests
         => Assert.IsNotEmpty(new PriceAdjustmentRuleType().Validate(J(Entries(("""{"kind":"Item","id":5}""", "FixedPrice", "9.999")))));
 
     [TestMethod]
+    public void PriceAdjustmentFixedPriceIsCappedAtOneMillion()
+    {
+        var type = new PriceAdjustmentRuleType();
+
+        Assert.IsEmpty(type.Validate(J(Entries(("""{"kind":"Item","id":5}""", "FixedPrice", "1000000")))));
+        Assert.Contains(
+            "entries[0].value: fixed price must be between 0.01 and 1000000.",
+            type.Validate(J(Entries(("""{"kind":"Item","id":5}""", "FixedPrice", "1000000.01")))));
+        Assert.IsNotEmpty(type.Validate(J(Entries(("""{"kind":"Item","id":5}""", "FixedPrice", "79228162514264337593543950335")))));
+    }
+
+    [TestMethod]
+    public void PromotionAmountOffIsCappedAtOneMillion()
+    {
+        var type = new PromotionRuleType();
+
+        Assert.IsEmpty(type.Validate(J(Line("""{"kind":"All"}""", "AmountOff", "1000000", "null", "Sale"))));
+        Assert.Contains(
+            "linePromotions[0].value: amount off must be between 0.01 and 1000000.",
+            type.Validate(J(Line("""{"kind":"All"}""", "AmountOff", "1000000.01", "null", "Sale"))));
+        Assert.IsEmpty(type.Validate(J(Order("AmountOff", "1000000", "0", "Sale"))));
+        Assert.Contains(
+            "orderPromotions[0].value: amount off must be between 0.01 and 1000000.",
+            type.Validate(J(Order("AmountOff", "1000000.01", "0", "Sale"))));
+    }
+
+    [TestMethod]
+    public void PromotionMinSubtotalIsCappedAtOneMillion()
+    {
+        var type = new PromotionRuleType();
+
+        Assert.IsEmpty(type.Validate(J(Order("AmountOff", "5", "1000000", "Sale"))));
+        Assert.Contains(
+            "orderPromotions[0].minSubtotal: must be between 0 and 1000000.",
+            type.Validate(J(Order("AmountOff", "5", "1000000.01", "Sale"))));
+    }
+
+    [TestMethod]
     public void PriceAdjustmentDuplicateTargetIsInvalid()
     {
         var errors = new PriceAdjustmentRuleType().Validate(J(Entries(("""{"kind":"Type","id":1}""", "PercentOff", "10"), ("""{"kind":"Type","id":1}""", "FixedPrice", "5"))));
@@ -138,6 +176,14 @@ public sealed class TargetedRuleTypesTests
     {
         Assert.IsNotEmpty(new PromotionRuleType().Validate(J(Line("""{"kind":"All"}""", "PercentOff", "10", "null", new string('a', 61)))));
         Assert.IsEmpty(new PromotionRuleType().Validate(J(Line("""{"kind":"All"}""", "PercentOff", "10", "null", new string('a', 60)))));
+    }
+
+    [TestMethod]
+    public void PromotionLabelLengthIsMeasuredOnTheRawString()
+    {
+        Assert.IsNotEmpty(new PromotionRuleType().Validate(J(Line("""{"kind":"All"}""", "PercentOff", "10", "null", " " + new string('a', 60)))));
+        Assert.IsNotEmpty(new PromotionRuleType().Validate(J(Line("""{"kind":"All"}""", "PercentOff", "10", "null", new string('a', 60) + " "))));
+        Assert.IsEmpty(new PromotionRuleType().Validate(J(Line("""{"kind":"All"}""", "PercentOff", "10", "null", " " + new string('a', 59)))));
     }
 
     [TestMethod]
@@ -253,6 +299,16 @@ public sealed class TargetedRuleTypesTests
 
         Assert.HasCount(1, published.Entries);
         Assert.IsEmpty(invalid.Entries);
+    }
+
+    [TestMethod]
+    public void ResolveFallsBackToDefaultWhenParametersAreUndefined()
+    {
+        var snapshot = new RulesSnapshot(1, Now, [new SnapshotRuleVersion("PRC-001", RuleScopes.Default, 1, Now.AddHours(-1), null, default)]);
+        var type = new PriceAdjustmentRuleType();
+
+        Assert.IsEmpty(type.Resolve(snapshot, Now).Entries);
+        Assert.IsNotEmpty(type.Validate(default));
     }
 
     [TestMethod]

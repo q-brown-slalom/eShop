@@ -55,6 +55,23 @@ public sealed class GlobalRuleTypesTests
         => Assert.AreEqual(1, new GracePeriodRuleType().Resolve(Snapshot(Rule("ORD-001", """{"minutes":"ten"}""")), Now).Minutes);
 
     [TestMethod]
+    public void ResolveFallsBackToDefaultWhenParametersAreUndefined()
+    {
+        var snapshot = new RulesSnapshot(1, Now, [new SnapshotRuleVersion("ORD-001", RuleScopes.Default, 1, Now.AddHours(-1), null, default)]);
+
+        Assert.AreEqual(1, new GracePeriodRuleType().Resolve(snapshot, Now).Minutes);
+    }
+
+    [TestMethod]
+    public void UndefinedParametersAreInvalidAndNeverThrow()
+    {
+        var type = new GracePeriodRuleType();
+
+        Assert.IsNotEmpty(type.Validate(default));
+        Assert.IsFalse(type.TryParse(default, out _));
+    }
+
+    [TestMethod]
     public void DefaultSerializesCamelCase()
         => Assert.AreEqual(0m, new ShippingFeeRuleType().Default.GetProperty("fee").GetDecimal());
 
