@@ -45,7 +45,7 @@ public abstract class IdentifiedCommandHandler<T, R> : IRequestHandler<Identifie
         }
         else
         {
-            await _requestManager.CreateRequestForCommandAsync<T>(message.Id);
+            R result;
             try
             {
                 var command = message.Command;
@@ -84,7 +84,7 @@ public abstract class IdentifiedCommandHandler<T, R> : IRequestHandler<Identifie
                     command);
 
                 // Send the embedded business command to mediator so it runs its related CommandHandler 
-                var result = await _mediator.Send(command, cancellationToken);
+                result = await _mediator.Send(command, cancellationToken);
 
                 _logger.LogInformation(
                     "Command result: {@Result} - {CommandName} - {IdProperty}: {CommandId} ({@Command})",
@@ -93,13 +93,21 @@ public abstract class IdentifiedCommandHandler<T, R> : IRequestHandler<Identifie
                     idProperty,
                     commandId,
                     command);
-
-                return result;
             }
             catch
             {
                 return default;
             }
+
+            // The request is recorded only after the command succeeds (a default result such as false means it failed),
+            // so a retry with the same request id runs the command again. It is written outside the try so a failure here,
+            // such as a concurrent duplicate, propagates and the surrounding transaction rolls back the command's changes.
+            if (!EqualityComparer<R>.Default.Equals(result, default))
+            {
+                await _requestManager.CreateRequestForCommandAsync<T>(message.Id);
+            }
+
+            return result;
         }
     }
 }

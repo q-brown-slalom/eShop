@@ -268,6 +268,32 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
     }
 
     [Fact]
+    public async Task RetryAfterFailedCreateWithSameRequestIdCreatesOrder()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+            List<QuoteLine> items = [new QuoteLine(2, 1)];
+
+            var failed = await PostOrderV2Async(requestId, items, expectedTotal: 20.50m, cardExpiration: DateTime.UtcNow.AddYears(-1));
+            Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+            Assert.Empty(await GetTestBuyerOrdersAsync());
+            Assert.False(await ClientRequestExistsAsync(requestId));
+
+            var retry = await PostOrderV2Async(requestId, items, expectedTotal: 20.50m);
+
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            var order = await GetSingleTestBuyerOrderAsync();
+            Assert.Equal(20.50m, order.Total);
+            Assert.True(await ClientRequestExistsAsync(requestId));
+        }
+        finally
+        {
+            await DeleteTestBuyerOrdersAsync();
+        }
+    }
+
+    [Fact]
     public async Task CreateOrderV1IgnoresClientUnitPrice()
     {
         try
@@ -449,10 +475,10 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         return JsonSerializer.Serialize(order);
     }
 
-    private async Task<HttpResponseMessage> PostOrderV2Async(Guid requestId, List<QuoteLine> items, decimal expectedTotal)
+    private async Task<HttpResponseMessage> PostOrderV2Async(Guid requestId, List<QuoteLine> items, decimal expectedTotal, DateTime? cardExpiration = null)
     {
         var body = new CreateOrderV2Request(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345",
-            "4012888888881881", "Test User", DateTime.UtcNow.AddYears(1), "123", 1, "test buyer", items, expectedTotal);
+            "4012888888881881", "Test User", cardExpiration ?? DateTime.UtcNow.AddYears(1), "123", 1, "test buyer", items, expectedTotal);
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/orders") { Content = JsonContent.Create(body) };
         request.Headers.Add("x-requestid", requestId.ToString());
         return await _httpClientV2.SendAsync(request, TestContext.Current.CancellationToken);
