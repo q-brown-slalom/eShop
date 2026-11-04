@@ -49,6 +49,16 @@ public static class Extensions
             .AddApiVersion(2.0)
             .AddAuthToken();
 
+        // Display prices get their own client: no retries, and QuotePriceProvider caps the call at
+        // QuotePriceProvider.DisplayPriceBudget, so catalog and item pages fall back to catalog prices fast when
+        // Ordering.API is down or slow (D7). Cart and checkout keep the standard resilience pipeline above.
+#pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is the documented way to opt one client out of the default handler.
+        services.AddHttpClient(QuotePriceProvider.HttpClientName, o => o.BaseAddress = new("https+http://ordering-api"))
+            .AddApiVersion(1.0)
+            .AddAuthToken()
+            .RemoveAllResilienceHandlers();
+#pragma warning restore EXTEXP0001
+
         services.AddScoped<IProductPriceProvider, QuotePriceProvider>();
     }
 

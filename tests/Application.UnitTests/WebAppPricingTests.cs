@@ -142,6 +142,40 @@ public class WebAppPricingTests
     }
 
     [TestMethod]
+    public async Task QuotePriceProviderFallsBackWithinBudgetWhenQuoteIsSlow()
+    {
+        var handler = new SlowHandler(TimeSpan.FromSeconds(30));
+        var logs = new ListLoggerProvider();
+        using var services = BuildServices(handler, logs: logs, standardResilience: true);
+        var provider = services.GetRequiredService<IProductPriceProvider>();
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var prices = await provider.GetDisplayPricesAsync([1, 2]);
+        stopwatch.Stop();
+
+        Assert.IsEmpty(prices);
+        Assert.IsLessThan(QuotePriceProvider.DisplayPriceBudget + TimeSpan.FromSeconds(1), stopwatch.Elapsed,
+            $"Display prices took {stopwatch.Elapsed}, longer than the {QuotePriceProvider.DisplayPriceBudget} budget.");
+        Assert.AreEqual(1, handler.Calls, "The display-price quote must not be retried.");
+        Assert.IsTrue(logs.Entries.Any(e => e.Level == LogLevel.Warning && e.Category == typeof(QuotePriceProvider).FullName));
+    }
+
+    [TestMethod]
+    public async Task QuotePriceProviderDoesNotRetryAFailedQuote()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        using var services = BuildServices(handler, standardResilience: true);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var prices = await services.GetRequiredService<IProductPriceProvider>().GetDisplayPricesAsync([1]);
+        stopwatch.Stop();
+
+        Assert.IsEmpty(prices);
+        Assert.HasCount(1, handler.Requests);
+        Assert.IsLessThan(QuotePriceProvider.DisplayPriceBudget, stopwatch.Elapsed);
+    }
+
+    [TestMethod]
     public async Task QuotePriceProviderSkipsRequestForNoProducts()
     {
         var handler = new StubHandler(_ => throw new InvalidOperationException("No request expected."));
@@ -153,9 +187,16 @@ public class WebAppPricingTests
         Assert.IsEmpty(handler.Requests);
     }
 
-    private static ServiceProvider BuildServices(StubHandler handler, Dictionary<string, string?>? config = null, ListLoggerProvider? logs = null)
+    private static ServiceProvider BuildServices(HttpMessageHandler handler, Dictionary<string, string?>? config = null, ListLoggerProvider? logs = null,
+        bool standardResilience = false)
     {
         var services = new ServiceCollection();
+        if (standardResilience)
+        {
+            // As AddServiceDefaults does for every WebApp client.
+            services.ConfigureHttpClientDefaults(http => http.AddStandardResilienceHandler());
+        }
+
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(config ?? []).Build());
         services.AddLogging(b =>
         {
@@ -172,6 +213,9 @@ public class WebAppPricingTests
             .ConfigureHttpClient(c => c.BaseAddress = new("http://ordering-api"))
             .ConfigurePrimaryHttpMessageHandler(() => handler);
         services.AddHttpClient<PricingService>()
+            .ConfigureHttpClient(c => c.BaseAddress = new("http://ordering-api"))
+            .ConfigurePrimaryHttpMessageHandler(() => handler);
+        services.AddHttpClient(QuotePriceProvider.HttpClientName)
             .ConfigureHttpClient(c => c.BaseAddress = new("http://ordering-api"))
             .ConfigurePrimaryHttpMessageHandler(() => handler);
 
@@ -227,6 +271,20 @@ public class WebAppPricingTests
                 request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value)),
                 body));
             return respond(request);
+        }
+    }
+
+    private sealed class SlowHandler(TimeSpan delay) : HttpMessageHandler
+    {
+        private int _calls;
+
+        public int Calls => _calls;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _calls);
+            await Task.Delay(delay, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
 
