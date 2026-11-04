@@ -5,7 +5,9 @@ using System.Text.Json;
 using Asp.Versioning;
 using Asp.Versioning.Http;
 using eShop.BusinessRules.Client.Pricing;
+using eShop.IntegrationEventLogEF;
 using eShop.Ordering.API.Application.Commands;
+using eShop.Ordering.API.Application.IntegrationEvents.Events;
 using eShop.Ordering.API.Application.Models;
 using eShop.Ordering.API.Application.Queries;
 using eShop.Ordering.Domain.AggregatesModel.BuyerAggregate;
@@ -21,6 +23,7 @@ namespace eShop.Ordering.FunctionalTests;
 public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
 {
     private readonly WebApplicationFactory<Program> _webApplicationFactory;
+    private readonly OrderingApiFixture _fixture;
     private readonly HttpClient _httpClient;
     private readonly TestBuyerOrders _testBuyerOrders;
 
@@ -29,6 +32,7 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         var handler = new ApiVersionHandler(new QueryStringApiVersionWriter(), new ApiVersion(1.0));
 
         _webApplicationFactory = fixture;
+        _fixture = fixture;
         _httpClient = _webApplicationFactory.CreateDefaultClient(handler);
         _testBuyerOrders = new TestBuyerOrders(fixture);
     }
@@ -158,8 +162,8 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
                 Quantity = 1,
                 PictureUrl = null
             };
-            var cardExpirationDate = Convert.ToDateTime("2023-12-22T12:34:24.334Z");
-            var OrderRequest = new CreateOrderRequest("1", "TestUser", null, null, null, null, null, "XXXXXXXXXXXX0005", "Test User", cardExpirationDate, "test buyer", 1, null, new List<BasketItem> { item });
+            var cardExpirationDate = DateTime.UtcNow.AddYears(1);
+            var OrderRequest = new CreateOrderRequest(AutoAuthorizeMiddleware.IDENTITY_ID, "TestUser", "city", "street", "state", "country", "12345", "XXXXXXXXXXXX0005", "Test User", cardExpirationDate, "123", 1, null, new List<BasketItem> { item });
             var content = new StringContent(JsonSerializer.Serialize(OrderRequest), UTF8Encoding.UTF8, "application/json")
             {
                 Headers = { { "x-requestid", Guid.NewGuid().ToString() } }
@@ -274,11 +278,14 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         {
             var requestId = Guid.NewGuid();
             List<QuoteLine> items = [new QuoteLine(2, 1)];
+            var orderStartedEvents = await OrderStartedEventCountAsync();
 
             var failed = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m, cardExpiration: DateTime.UtcNow.AddYears(-1));
-            Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, failed.StatusCode);
+            Assert.Equal("application/problem+json", failed.Content.Headers.ContentType?.MediaType);
             Assert.Empty(await _testBuyerOrders.GetAllAsync());
             Assert.False(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents, await OrderStartedEventCountAsync());
 
             var retry = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
 
@@ -286,9 +293,79 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
             var order = await _testBuyerOrders.GetSingleAsync();
             Assert.Equal(20.50m, order.Total);
             Assert.True(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents + 1, await OrderStartedEventCountAsync());
         }
         finally
         {
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    // A catalog price of 0.00 breaks the order's minimum unit price while the order is built. Before the fix the
+    // basket-clearing OrderStarted event was already saved and committed (and v1 answered 200 with no order).
+    [Fact]
+    public async Task CreateOrderV2ThatFailsWhileBuildingTheOrderSavesNothingAndRetryCreatesOneOrder()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+            List<QuoteLine> items = [new QuoteLine(2, 1)];
+            var orderStartedEvents = await OrderStartedEventCountAsync();
+
+            _fixture.CatalogPriceSource.OverridePrice(2, 0.00m);
+            var failed = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 0.00m);
+            _fixture.CatalogPriceSource.ResetPrices();
+
+            Assert.Equal(HttpStatusCode.BadRequest, failed.StatusCode);
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
+            Assert.False(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents, await OrderStartedEventCountAsync());
+
+            var retry = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
+            var duplicate = await _testBuyerOrders.PostV2Async(requestId, items, expectedTotal: 20.50m);
+
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, duplicate.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(20.50m, order.Total);
+            Assert.Equal(orderStartedEvents + 1, await OrderStartedEventCountAsync());
+        }
+        finally
+        {
+            _fixture.CatalogPriceSource.ResetPrices();
+            await _testBuyerOrders.DeleteAllAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateOrderV1ThatFailsWhileBuildingTheOrderSavesNothingAndRetryCreatesOneOrder()
+    {
+        try
+        {
+            var requestId = Guid.NewGuid();
+            var item = new BasketItem { Id = "1", ProductId = 2, ProductName = "x", UnitPrice = 20.50m, Quantity = 1 };
+            var orderStartedEvents = await OrderStartedEventCountAsync();
+
+            _fixture.CatalogPriceSource.OverridePrice(2, 0.00m);
+            var failed = await PostOrderV1Async(requestId, item);
+            _fixture.CatalogPriceSource.ResetPrices();
+
+            Assert.Equal(HttpStatusCode.BadRequest, failed.StatusCode);
+            Assert.Empty(await _testBuyerOrders.GetAllAsync());
+            Assert.False(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents, await OrderStartedEventCountAsync());
+
+            var retry = await PostOrderV1Async(requestId, item);
+
+            Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+            var order = await _testBuyerOrders.GetSingleAsync();
+            Assert.Equal(20.50m, order.Total);
+            Assert.True(await ClientRequestExistsAsync(requestId));
+            Assert.Equal(orderStartedEvents + 1, await OrderStartedEventCountAsync());
+        }
+        finally
+        {
+            _fixture.CatalogPriceSource.ResetPrices();
             await _testBuyerOrders.DeleteAllAsync();
         }
     }
@@ -489,5 +566,14 @@ public sealed class OrderingApiTests : IClassFixture<OrderingApiFixture>
         using var scope = _webApplicationFactory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
         return await context.Set<ClientRequest>().AnyAsync(r => r.Id == requestId, TestContext.Current.CancellationToken);
+    }
+
+    // OrderStartedIntegrationEvent clears the buyer's basket once published, so it must only be saved with an order.
+    private async Task<int> OrderStartedEventCountAsync()
+    {
+        using var scope = _webApplicationFactory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
+        return await context.Set<IntegrationEventLogEntry>()
+            .CountAsync(e => e.EventTypeName == typeof(OrderStartedIntegrationEvent).FullName, TestContext.Current.CancellationToken);
     }
 }

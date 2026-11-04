@@ -27,7 +27,7 @@ public static class OrdersApi
         api.MapPost("/", CreateOrderV2Async)
             .WithName("CreateOrderV2")
             .WithSummary("Create an order at server prices")
-            .WithDescription($"Prices the items server-side and creates the order only when the priced total equals `expectedTotal` (rounded to 2 decimals). Otherwise returns 409 ProblemDetails of type `{PricesChangedProblemType}` with the fresh quote in `quote` and records nothing, so the same `x-requestid` can be retried. Returns 400 listing unknown product ids, and 503 when the catalog is unavailable.")
+            .WithDescription($"Prices the items server-side and creates the order only when the priced total equals `expectedTotal` (rounded to 2 decimals). Otherwise returns 409 ProblemDetails of type `{PricesChangedProblemType}` with the fresh quote in `quote` and records nothing, so the same `x-requestid` can be retried. Returns 400 listing unknown product ids, 400 ProblemDetails when the order breaks an ordering rule (such as an expired card), and 503 when the catalog is unavailable. A rejected or failed create saves nothing, so the same `x-requestid` can be retried.")
             .WithTags("Orders");
 
         return api;
@@ -62,7 +62,7 @@ public static class OrdersApi
             requestCancelOrder.Command.OrderNumber,
             requestCancelOrder);
 
-        var commandResult = await services.Mediator.Send(requestCancelOrder);
+        var commandResult = await SendIdentifiedCommandAsync(requestCancelOrder, services);
 
         if (!commandResult)
         {
@@ -91,7 +91,7 @@ public static class OrdersApi
             requestShipOrder.Command.OrderNumber,
             requestShipOrder);
 
-        var commandResult = await services.Mediator.Send(requestShipOrder);
+        var commandResult = await SendIdentifiedCommandAsync(requestShipOrder, services);
 
         if (!commandResult)
         {
@@ -187,11 +187,14 @@ public static class OrdersApi
             request.State, request.Country, request.ZipCode, request.CardNumber, request.CardHolderName, request.CardExpiration,
             request.CardSecurityNumber, request.CardTypeId);
 
-        if (await SendCreateOrderAsync(requestId, command, services))
+        var failure = await SendCreateOrderAsync(requestId, command, services);
+        if (failure is not null)
         {
-            metrics.CreateOrderV1Called();
-            await RecordCreateOrderV1UsageAsync(usage, services.Logger);
+            return failure;
         }
+
+        metrics.CreateOrderV1Called();
+        await RecordCreateOrderV1UsageAsync(usage, services.Logger);
 
         return TypedResults.Ok();
     }
@@ -253,9 +256,10 @@ public static class OrdersApi
             request.State, request.Country, request.ZipCode, request.CardNumber, request.CardHolderName, request.CardExpiration,
             request.CardSecurityNumber, request.CardTypeId);
 
-        if (!await SendCreateOrderAsync(requestId, command, services))
+        var failure = await SendCreateOrderAsync(requestId, command, services);
+        if (failure is not null)
         {
-            return TypedResults.Problem(detail: "Create order failed to process.", statusCode: StatusCodes.Status500InternalServerError);
+            return failure;
         }
 
         return TypedResults.Ok();
@@ -290,7 +294,9 @@ public static class OrdersApi
         };
     }
 
-    private static async Task<bool> SendCreateOrderAsync(Guid requestId, CreateOrderCommand command, OrderServices services)
+    // Returns null when the order was created (or the request id was already used for a created order), otherwise the
+    // problem to return. A failed command has been rolled back, so the same x-requestid can be retried.
+    private static async Task<ProblemHttpResult> SendCreateOrderAsync(Guid requestId, CreateOrderCommand command, OrderServices services)
     {
         using (services.Logger.BeginScope(new List<KeyValuePair<string, object>> { new("rules.snapshot.version", command.PricingSnapshotVersion) }))
         {
@@ -303,18 +309,49 @@ public static class OrdersApi
                 nameof(requestCreateOrder.Id),
                 requestCreateOrder.Id);
 
-            var result = await services.Mediator.Send(requestCreateOrder);
-
-            if (result)
+            bool result;
+            try
             {
-                services.Logger.LogInformation("CreateOrderCommand succeeded - RequestId: {RequestId}", requestId);
+                result = await services.Mediator.Send(requestCreateOrder);
             }
-            else
+            catch (OrderingDomainException ex)
+            {
+                services.Logger.LogWarning(ex, "CreateOrderCommand rejected - RequestId: {RequestId}", requestId);
+                return TypedResults.Problem(
+                    title: "Order rejected",
+                    detail: $"The order could not be created: {ex.Message}",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+            catch (Exception ex)
+            {
+                services.Logger.LogError(ex, "CreateOrderCommand failed - RequestId: {RequestId}", requestId);
+                return TypedResults.Problem(detail: "Create order failed to process.", statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            if (!result)
             {
                 services.Logger.LogWarning("CreateOrderCommand failed - RequestId: {RequestId}", requestId);
+                return TypedResults.Problem(detail: "Create order failed to process.", statusCode: StatusCodes.Status500InternalServerError);
             }
 
-            return result;
+            services.Logger.LogInformation("CreateOrderCommand succeeded - RequestId: {RequestId}", requestId);
+            return null;
+        }
+    }
+
+    // Cancel and ship keep answering a failed command with their 500 ProblemDetails now that failures propagate
+    // (and roll back) instead of being swallowed by IdentifiedCommandHandler.
+    private static async Task<bool> SendIdentifiedCommandAsync<T>(IdentifiedCommand<T, bool> command, OrderServices services)
+        where T : IRequest<bool>
+    {
+        try
+        {
+            return await services.Mediator.Send(command);
+        }
+        catch (Exception ex)
+        {
+            services.Logger.LogWarning(ex, "{CommandName} failed - RequestId: {RequestId}", command.GetGenericTypeName(), command.Id);
+            return false;
         }
     }
 

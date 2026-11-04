@@ -28,10 +28,6 @@ public class CreateOrderCommandHandler
 
     public async Task<bool> Handle(CreateOrderCommand message, CancellationToken cancellationToken)
     {
-        // Add Integration event to clean the basket
-        var orderStartedIntegrationEvent = new OrderStartedIntegrationEvent(message.UserId);
-        await _orderingIntegrationEventService.AddAndSaveEventAsync(orderStartedIntegrationEvent);
-
         // Add/Update the Buyer AggregateRoot
         // DDD patterns comment: Add child entities and value-objects through the Order Aggregate-Root
         // methods and constructor so validations, invariants and business logic 
@@ -56,8 +52,18 @@ public class CreateOrderCommandHandler
         {
             _logger.LogInformation("Creating order with {LineCount} lines", order.OrderItems.Count);
 
-            return await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken);
+            if (!await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken))
+            {
+                return false;
+            }
         }
+
+        // The basket is cleared only for an order that was built and saved. The event joins the same transaction,
+        // so a failure anywhere in the command leaves neither the order nor the event behind.
+        var orderStartedIntegrationEvent = new OrderStartedIntegrationEvent(message.UserId);
+        await _orderingIntegrationEventService.AddAndSaveEventAsync(orderStartedIntegrationEvent);
+
+        return true;
     }
 }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading;
 using eShop.BusinessRules.Client.Pricing;
 using eShop.Ordering.API.Application.Pricing;
@@ -19,6 +20,13 @@ public sealed class FakeCatalogPriceSource : ICatalogPriceSource
         [5] = new(5, "Fake Product 5", 0.99m, 3, 1, null),
     };
 
+    private readonly ConcurrentDictionary<int, decimal> _priceOverrides = new();
+
+    /// <summary>Makes this instance return <paramref name="price"/> for the product until <see cref="ResetPrices"/>.</summary>
+    public void OverridePrice(int productId, decimal price) => _priceOverrides[productId] = price;
+
+    public void ResetPrices() => _priceOverrides.Clear();
+
     public Task<IReadOnlyDictionary<int, CatalogPrice>> GetPricesAsync(IReadOnlyCollection<int> productIds, CancellationToken ct)
     {
         if (productIds.Contains(UnavailableProductId))
@@ -29,7 +37,7 @@ public sealed class FakeCatalogPriceSource : ICatalogPriceSource
         IReadOnlyDictionary<int, CatalogPrice> prices = productIds
             .Distinct()
             .Where(Products.ContainsKey)
-            .ToDictionary(id => id, id => Products[id]);
+            .ToDictionary(id => id, id => _priceOverrides.TryGetValue(id, out var price) ? Products[id] with { BasePrice = price } : Products[id]);
 
         return Task.FromResult(prices);
     }

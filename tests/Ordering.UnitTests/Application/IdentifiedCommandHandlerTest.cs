@@ -80,7 +80,7 @@ public class IdentifiedCommandHandlerTest
     }
 
     [TestMethod]
-    public async Task Handler_does_not_record_request_when_command_throws()
+    public async Task Handler_propagates_failure_and_does_not_record_request_when_command_throws()
     {
         var fakeGuid = Guid.NewGuid();
         var fakeOrderCmd = new IdentifiedCommand<CreateOrderCommand, bool>(FakeOrderRequest(), fakeGuid);
@@ -92,9 +92,9 @@ public class IdentifiedCommandHandlerTest
             .Returns(Task.FromException<bool>(new OrderingDomainException("invalid order")));
 
         var handler = new CreateOrderIdentifiedCommandHandler(_mediator, _requestManager, _loggerMock);
-        var result = await handler.Handle(fakeOrderCmd, CancellationToken.None);
 
-        Assert.IsFalse(result);
+        // The failure must reach TransactionBehavior so it rolls back the command's writes instead of committing them.
+        await Assert.ThrowsExactlyAsync<OrderingDomainException>(() => handler.Handle(fakeOrderCmd, CancellationToken.None));
         await _requestManager.DidNotReceive().CreateRequestForCommandAsync<CreateOrderCommand>(Arg.Any<Guid>());
     }
 

@@ -21,6 +21,9 @@ public sealed class OrderingApiFixture : WebApplicationFactory<Program>, IAsyncL
     /// <summary>BusinessRules.API is never reachable from this host, so pricing must fall back to defaults.</summary>
     public UnavailableRulesSnapshotSource RulesSnapshotSource { get; } = new();
 
+    /// <summary>Stands in for Catalog.API. Tests that override a price must reset it.</summary>
+    public FakeCatalogPriceSource CatalogPriceSource { get; } = new();
+
     private string _postgresConnectionString;
 
     public OrderingApiFixture()
@@ -53,7 +56,7 @@ public sealed class OrderingApiFixture : WebApplicationFactory<Program>, IAsyncL
             services.AddSingleton<IStartupFilter>(new AutoAuthorizeStartupFilter());
 
             services.RemoveAll<ICatalogPriceSource>();
-            services.AddSingleton<ICatalogPriceSource>(new FakeCatalogPriceSource());
+            services.AddSingleton<ICatalogPriceSource>(CatalogPriceSource);
 
             services.RemoveAll<IRulesSnapshotSource>();
             services.AddSingleton<IRulesSnapshotSource>(RulesSnapshotSource);

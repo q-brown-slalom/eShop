@@ -45,62 +45,55 @@ public abstract class IdentifiedCommandHandler<T, R> : IRequestHandler<Identifie
         }
         else
         {
-            R result;
-            try
+            // Failures propagate so the surrounding TransactionBehavior rolls back everything the command wrote.
+            var command = message.Command;
+            var commandName = command.GetGenericTypeName();
+            var idProperty = string.Empty;
+            var commandId = string.Empty;
+
+            // Only identifiers are logged, never the command: CreateOrderCommand carries card and address data.
+            switch (command)
             {
-                var command = message.Command;
-                var commandName = command.GetGenericTypeName();
-                var idProperty = string.Empty;
-                var commandId = string.Empty;
+                case CreateOrderCommand:
+                    idProperty = "RequestId";
+                    commandId = $"{message.Id}";
+                    break;
 
-                // Only identifiers are logged, never the command: CreateOrderCommand carries card and address data.
-                switch (command)
-                {
-                    case CreateOrderCommand:
-                        idProperty = "RequestId";
-                        commandId = $"{message.Id}";
-                        break;
+                case CancelOrderCommand cancelOrderCommand:
+                    idProperty = nameof(cancelOrderCommand.OrderNumber);
+                    commandId = $"{cancelOrderCommand.OrderNumber}";
+                    break;
 
-                    case CancelOrderCommand cancelOrderCommand:
-                        idProperty = nameof(cancelOrderCommand.OrderNumber);
-                        commandId = $"{cancelOrderCommand.OrderNumber}";
-                        break;
+                case ShipOrderCommand shipOrderCommand:
+                    idProperty = nameof(shipOrderCommand.OrderNumber);
+                    commandId = $"{shipOrderCommand.OrderNumber}";
+                    break;
 
-                    case ShipOrderCommand shipOrderCommand:
-                        idProperty = nameof(shipOrderCommand.OrderNumber);
-                        commandId = $"{shipOrderCommand.OrderNumber}";
-                        break;
-
-                    default:
-                        idProperty = "Id?";
-                        commandId = "n/a";
-                        break;
-                }
-
-                _logger.LogInformation(
-                    "Sending command: {CommandName} - {IdProperty}: {CommandId}",
-                    commandName,
-                    idProperty,
-                    commandId);
-
-                // Send the embedded business command to mediator so it runs its related CommandHandler 
-                result = await _mediator.Send(command, cancellationToken);
-
-                _logger.LogInformation(
-                    "Command result: {@Result} - {CommandName} - {IdProperty}: {CommandId}",
-                    result,
-                    commandName,
-                    idProperty,
-                    commandId);
+                default:
+                    idProperty = "Id?";
+                    commandId = "n/a";
+                    break;
             }
-            catch
-            {
-                return default;
-            }
+
+            _logger.LogInformation(
+                "Sending command: {CommandName} - {IdProperty}: {CommandId}",
+                commandName,
+                idProperty,
+                commandId);
+
+            // Send the embedded business command to mediator so it runs its related CommandHandler 
+            var result = await _mediator.Send(command, cancellationToken);
+
+            _logger.LogInformation(
+                "Command result: {@Result} - {CommandName} - {IdProperty}: {CommandId}",
+                result,
+                commandName,
+                idProperty,
+                commandId);
 
             // The request is recorded only after the command succeeds (a default result such as false means it failed),
-            // so a retry with the same request id runs the command again. It is written outside the try so a failure here,
-            // such as a concurrent duplicate, propagates and the surrounding transaction rolls back the command's changes.
+            // so a retry with the same request id runs the command again. A failure here, such as a concurrent duplicate,
+            // propagates and the surrounding transaction rolls back the command's changes.
             if (!EqualityComparer<R>.Default.Equals(result, default))
             {
                 await _requestManager.CreateRequestForCommandAsync<T>(message.Id);
