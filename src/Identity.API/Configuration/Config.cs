@@ -47,9 +47,9 @@
             {
                 new IdentityResources.OpenId(),
                 new IdentityResources.Profile(),
-                new IdentityResource("roles", "Your roles", new[] { JwtClaimTypes.Role })
-                            };
-                        }
+                new IdentityResource("roles", "Your roles", new[] { JwtClaimTypes.Role }),
+            };
+        }
 
         // client want to access resources (aka scopes)
         public static IEnumerable<Client> GetClients(IConfiguration configuration)
