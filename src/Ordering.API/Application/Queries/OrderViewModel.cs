@@ -6,6 +6,7 @@ public record Orderitem
     public int Units { get; init; }
     public double UnitPrice { get; init; }
     public decimal Discount { get; init; }
+    public string PromotionLabel { get; init; }
     public string PictureUrl { get; init; }
 }
 

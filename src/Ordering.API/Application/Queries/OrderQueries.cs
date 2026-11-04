@@ -33,6 +33,7 @@ public class OrderQueries(OrderingContext context)
                 Units = oi.Units,
                 UnitPrice = (double)oi.UnitPrice,
                 Discount = oi.Discount,
+                PromotionLabel = oi.PromotionLabel,
                 PictureUrl = oi.PictureUrl
             }).ToList()
         };

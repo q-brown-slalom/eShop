@@ -59,4 +59,8 @@ public record OrderItemDTO
     public int Units { get; init; }
 
     public string PictureUrl { get; init; }
+
+    public string PromotionLabel { get; init; }
+
+    public decimal OrderDiscountShare { get; init; }
 }
